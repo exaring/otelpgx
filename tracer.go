@@ -14,6 +14,8 @@ import (
 	"github.com/exaring/otelpgx/internal"
 )
 
+// Tracer is a wrapper around the pgx tracer interfaces which instrument
+// queries.
 type Tracer struct {
 	tracer            trace.Tracer
 	attrs             []attribute.KeyValue
@@ -28,6 +30,7 @@ type tracerConfig struct {
 	logSQLStatement   bool
 }
 
+// NewTracer returns a new Tracer.
 func NewTracer(opts ...Option) *Tracer {
 	cfg := &tracerConfig{
 		tp: otel.GetTracerProvider(),
@@ -57,6 +60,8 @@ func recordError(span trace.Span, err error) {
 	}
 }
 
+// TraceQueryStart is called at the beginning of Query, QueryRow, and Exec calls.
+// The returned context is used for the rest of the call and will be passed to TraceQueryEnd.
 func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
 	if !trace.SpanFromContext(ctx).IsRecording() {
 		return ctx
@@ -88,6 +93,7 @@ func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 	return ctx
 }
 
+// TraceQueryEnd is called at the end of Query, QueryRow, and Exec calls.
 func (t *Tracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
 	span := trace.SpanFromContext(ctx)
 	recordError(span, data.Err)
@@ -95,6 +101,9 @@ func (t *Tracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQ
 	span.End()
 }
 
+// TraceCopyFromStart is called at the beginning of CopyFrom calls. The
+// returned context is used for the rest of the call and will be passed to
+// TraceCopyFromEnd.
 func (t *Tracer) TraceCopyFromStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceCopyFromStartData) context.Context {
 	if !trace.SpanFromContext(ctx).IsRecording() {
 		return ctx
@@ -118,6 +127,7 @@ func (t *Tracer) TraceCopyFromStart(ctx context.Context, conn *pgx.Conn, data pg
 	return ctx
 }
 
+// TraceCopyFromEnd is called at the end of CopyFrom calls.
 func (t *Tracer) TraceCopyFromEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceCopyFromEndData) {
 	span := trace.SpanFromContext(ctx)
 	recordError(span, data.Err)
@@ -125,6 +135,9 @@ func (t *Tracer) TraceCopyFromEnd(ctx context.Context, _ *pgx.Conn, data pgx.Tra
 	span.End()
 }
 
+// TraceBatchStart is called at the beginning of SendBatch calls. The returned
+// context is used for the rest of the call and will be passed to
+// TraceBatchQuery and TraceBatchEnd.
 func (t *Tracer) TraceBatchStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceBatchStartData) context.Context {
 	if !trace.SpanFromContext(ctx).IsRecording() {
 		return ctx
@@ -153,6 +166,7 @@ func (t *Tracer) TraceBatchStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 	return ctx
 }
 
+// TraceBatchQuery is called at the after each query in a batch.
 func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.TraceBatchQueryData) {
 	opts := []trace.SpanStartOption{
 		trace.WithSpanKind(trace.SpanKindClient),
@@ -181,6 +195,7 @@ func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.T
 	span.End()
 }
 
+// TraceBatchEnd is called at the end of SendBatch calls.
 func (t *Tracer) TraceBatchEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceBatchEndData) {
 	span := trace.SpanFromContext(ctx)
 	recordError(span, data.Err)
@@ -188,6 +203,9 @@ func (t *Tracer) TraceBatchEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceB
 	span.End()
 }
 
+// TraceConnectStart is called at the beginning of Connect and ConnectConfig
+// calls. The returned context is used for the rest of the call and will be
+// passed to TraceConnectEnd.
 func (t *Tracer) TraceConnectStart(ctx context.Context, data pgx.TraceConnectStartData) context.Context {
 	if !trace.SpanFromContext(ctx).IsRecording() {
 		return ctx
@@ -210,6 +228,7 @@ func (t *Tracer) TraceConnectStart(ctx context.Context, data pgx.TraceConnectSta
 	return ctx
 }
 
+// TraceConnectEnd is called at the end of Connect and ConnectConfig calls.
 func (t *Tracer) TraceConnectEnd(ctx context.Context, data pgx.TraceConnectEndData) {
 	span := trace.SpanFromContext(ctx)
 	recordError(span, data.Err)
@@ -217,6 +236,9 @@ func (t *Tracer) TraceConnectEnd(ctx context.Context, data pgx.TraceConnectEndDa
 	span.End()
 }
 
+// TracePrepareStart is called at the beginning of Prepare calls. The returned
+// context is used for the rest of the call and will be passed to
+// TracePrepareEnd.
 func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx.TracePrepareStartData) context.Context {
 	if !trace.SpanFromContext(ctx).IsRecording() {
 		return ctx
@@ -248,6 +270,7 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 	return ctx
 }
 
+// TracePrepareEnd is called at the end of Prepare calls.
 func (t *Tracer) TracePrepareEnd(ctx context.Context, _ *pgx.Conn, data pgx.TracePrepareEndData) {
 	span := trace.SpanFromContext(ctx)
 	recordError(span, data.Err)
