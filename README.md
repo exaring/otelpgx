@@ -1,3 +1,5 @@
+[![Go Reference](https://pkg.go.dev/badge/github.com/exaring/otelpgx.svg)](https://pkg.go.dev/github.com/exaring/otelpgx)
+
 # otelpgx
 
 Provides [OpenTelemetry](https://github.com/open-telemetry/opentelemetry-go) 
@@ -5,7 +7,7 @@ instrumentation for the [jackc/pgx](https://github.com/jackc/pgx) library.
 
 ## Requirements
 
-- Go 1.18 (or higher)
+- go 1.18 (or higher)
 - pgx v5 (or higher)
 
 ## Usage
@@ -13,7 +15,7 @@ instrumentation for the [jackc/pgx](https://github.com/jackc/pgx) library.
 Make sure you have a suitable pgx version:
 
 ```bash
-go get github.com/jackc/pgx/v5@v5.0.0-alpha.5
+go get github.com/jackc/pgx/v5
 ```
 
 Install the library:
