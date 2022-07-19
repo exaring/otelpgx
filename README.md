@@ -16,6 +16,12 @@ Make sure you have a suitable pgx version:
 go get github.com/jackc/pgx/v5@v5.0.0-alpha.5
 ```
 
+Install the library:
+
+```go
+go get github.com/exaring/otelpgx
+```
+
 Create the tracer as part of your connection:
 
 ```go
