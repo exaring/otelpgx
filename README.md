@@ -19,17 +19,17 @@ go get github.com/jackc/pgx/v5@v5.0.0-alpha.5
 Create the tracer as part of your connection:
 
 ```go
-	cfg, err := pgxpool.ParseConfig(connString)
-    if err != nil {
-        return nil, fmt.Errorf("create connection pool: %w", err)
-    }
+cfg, err := pgxpool.ParseConfig(connString)
+if err != nil {
+    return nil, fmt.Errorf("create connection pool: %w", err)
+}
 
-    cfg.ConnConfig.Tracer = otelpgx.NewTracer()
+cfg.ConnConfig.Tracer = otelpgx.NewTracer()
 
-    conn, err := pgxpool.NewConfig(ctx, cfg)
-	if err != nil {
-        return nil, fmt.Errorf("connect to database: %w", err)
-    }
+conn, err := pgxpool.NewConfig(ctx, cfg)
+if err != nil {
+    return nil, fmt.Errorf("connect to database: %w", err)
+}
 ```
 
 See [options.go](options.go) for the full list of options.
