@@ -1,5 +1,7 @@
 GO ?= go
 
+all: test
+
 .PHONY: test
 test: lint vet
 
@@ -11,5 +13,6 @@ lint:
 vet:
 	$(GO) vet ./...
 
-
-
+.PHONY: deps
+deps:
+	go get -u golang.org/x/lint/golint
