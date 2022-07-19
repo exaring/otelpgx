@@ -3,7 +3,7 @@ GO ?= go
 all: test
 
 .PHONY: test
-test: lint vet
+test: vet
 
 .PHONY: lint
 lint:
