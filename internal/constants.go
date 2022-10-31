@@ -7,5 +7,5 @@ const (
 
 	// InstrumentationVersion is the version of the otelpgx library. This will
 	// be used as an attribute on each span.
-	InstrumentationVersion = "v0.1.0"
+	InstrumentationVersion = "v0.2.0"
 )
