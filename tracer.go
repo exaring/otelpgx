@@ -74,9 +74,9 @@ func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 
 	if conn != nil && conn.Config() != nil {
 		opts = append(opts,
-			trace.WithAttributes(attribute.String("database.host", conn.Config().Host)),
-			trace.WithAttributes(attribute.Int("database.port", int(conn.Config().Port))),
-			trace.WithAttributes(attribute.String("database.user", conn.Config().User)))
+			trace.WithAttributes(attribute.String(string(semconv.NetPeerNameKey), conn.Config().Host)),
+			trace.WithAttributes(attribute.Int(string(semconv.NetPeerPortKey), int(conn.Config().Port))),
+			trace.WithAttributes(attribute.String(string(semconv.DBUserKey), conn.Config().User)))
 	}
 
 	if t.logSQLStatement {
@@ -117,9 +117,9 @@ func (t *Tracer) TraceCopyFromStart(ctx context.Context, conn *pgx.Conn, data pg
 
 	if conn != nil && conn.Config() != nil {
 		opts = append(opts,
-			trace.WithAttributes(attribute.String("database.host", conn.Config().Host)),
-			trace.WithAttributes(attribute.Int("database.port", int(conn.Config().Port))),
-			trace.WithAttributes(attribute.String("database.user", conn.Config().User)))
+			trace.WithAttributes(attribute.String(string(semconv.NetPeerNameKey), conn.Config().Host)),
+			trace.WithAttributes(attribute.Int(string(semconv.NetPeerPortKey), int(conn.Config().Port))),
+			trace.WithAttributes(attribute.String(string(semconv.DBUserKey), conn.Config().User)))
 	}
 
 	ctx, _ = t.tracer.Start(ctx, "copy_from "+data.TableName.Sanitize(), opts...)
@@ -156,9 +156,9 @@ func (t *Tracer) TraceBatchStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 
 	if conn != nil && conn.Config() != nil {
 		opts = append(opts,
-			trace.WithAttributes(attribute.String("database.host", conn.Config().Host)),
-			trace.WithAttributes(attribute.Int("database.port", int(conn.Config().Port))),
-			trace.WithAttributes(attribute.String("database.user", conn.Config().User)))
+			trace.WithAttributes(attribute.String(string(semconv.NetPeerNameKey), conn.Config().Host)),
+			trace.WithAttributes(attribute.Int(string(semconv.NetPeerPortKey), int(conn.Config().Port))),
+			trace.WithAttributes(attribute.String(string(semconv.DBUserKey), conn.Config().User)))
 	}
 
 	ctx, _ = t.tracer.Start(ctx, "batch start", opts...)
@@ -175,9 +175,9 @@ func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.T
 
 	if conn != nil && conn.Config() != nil {
 		opts = append(opts,
-			trace.WithAttributes(attribute.String("database.host", conn.Config().Host)),
-			trace.WithAttributes(attribute.Int("database.port", int(conn.Config().Port))),
-			trace.WithAttributes(attribute.String("database.user", conn.Config().User)))
+			trace.WithAttributes(attribute.String(string(semconv.NetPeerNameKey), conn.Config().Host)),
+			trace.WithAttributes(attribute.Int(string(semconv.NetPeerPortKey), int(conn.Config().Port))),
+			trace.WithAttributes(attribute.String(string(semconv.DBUserKey), conn.Config().User)))
 	}
 
 	if t.logSQLStatement {
@@ -218,9 +218,9 @@ func (t *Tracer) TraceConnectStart(ctx context.Context, data pgx.TraceConnectSta
 
 	if data.ConnConfig != nil {
 		opts = append(opts,
-			trace.WithAttributes(attribute.String("database.host", data.ConnConfig.Host)),
-			trace.WithAttributes(attribute.Int("database.port", int(data.ConnConfig.Port))),
-			trace.WithAttributes(attribute.String("database.user", data.ConnConfig.User)))
+			trace.WithAttributes(attribute.String(string(semconv.NetPeerNameKey), data.ConnConfig.Host)),
+			trace.WithAttributes(attribute.Int(string(semconv.NetPeerPortKey), int(data.ConnConfig.Port))),
+			trace.WithAttributes(attribute.String(string(semconv.DBUserKey), data.ConnConfig.User)))
 	}
 
 	ctx, _ = t.tracer.Start(ctx, "connect", opts...)
@@ -251,9 +251,9 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 
 	if conn != nil && conn.Config() != nil {
 		opts = append(opts,
-			trace.WithAttributes(attribute.String("database.host", conn.Config().Host)),
-			trace.WithAttributes(attribute.Int("database.port", int(conn.Config().Port))),
-			trace.WithAttributes(attribute.String("database.user", conn.Config().User)))
+			trace.WithAttributes(attribute.String(string(semconv.NetPeerNameKey), conn.Config().Host)),
+			trace.WithAttributes(attribute.Int(string(semconv.NetPeerPortKey), int(conn.Config().Port))),
+			trace.WithAttributes(attribute.String(string(semconv.DBUserKey), conn.Config().User)))
 	}
 
 	if t.logSQLStatement {
