@@ -60,6 +60,21 @@ func recordError(span trace.Span, err error) {
 	}
 }
 
+const sqlOperationUnknkown = "UNKNOWN"
+
+// sqlOperationName attempts to get the first 'word' from a given SQL query, which usually
+// is the operation name (e.g. 'SELECT').
+func sqlOperationName(query string) string {
+	parts := strings.Fields(query)
+	if len(parts) == 0 {
+		// Fall back to a fixed value to prevent creating lots of tracing operations
+		// differing only by the amount of whitespace in them (in case we'd fall back
+		// to the full query or a cut-off version).
+		return sqlOperationUnknkown
+	}
+	return strings.ToUpper(parts[0])
+}
+
 func appendConnectionAttributes(config *pgx.ConnConfig, opts []trace.SpanStartOption) {
 	if config != nil {
 		opts = append(opts,
@@ -91,7 +106,7 @@ func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 
 	spanName := "query " + data.SQL
 	if t.trimQuerySpanName {
-		spanName = "query " + strings.Split(data.SQL, " ")[0]
+		spanName = "query " + sqlOperationName(data.SQL)
 	}
 
 	ctx, _ = t.tracer.Start(ctx, spanName, opts...)
@@ -183,7 +198,7 @@ func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.T
 
 	spanName := "batch query " + data.SQL
 	if t.trimQuerySpanName {
-		spanName = "query " + strings.Split(data.SQL, " ")[0]
+		spanName = "query " + sqlOperationName(data.SQL)
 	}
 
 	_, span := t.tracer.Start(ctx, spanName, opts...)
@@ -253,7 +268,7 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 
 	spanName := "prepare " + data.SQL
 	if t.trimQuerySpanName {
-		spanName = "prepare " + strings.Split(data.SQL, " ")[0]
+		spanName = "prepare " + sqlOperationName(data.SQL)
 	}
 
 	ctx, _ = t.tracer.Start(ctx, spanName, opts...)
