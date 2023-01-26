@@ -49,3 +49,11 @@ func WithDisableSQLStatementInAttributes() Option {
 		cfg.logSQLStatement = false
 	})
 }
+
+// WithIncludeParams makes the query's parameters included as a span attribute pgx.db.params.
+// This is implicitly disabled if WithDisableSQLStatementInAttributes is used.
+func WithIncludeParams() Option {
+	return optionFunc(func(cfg *tracerConfig) {
+		cfg.includeParams = true
+	})
+}

@@ -2,6 +2,7 @@ package otelpgx
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -21,6 +22,7 @@ type Tracer struct {
 	attrs             []attribute.KeyValue
 	trimQuerySpanName bool
 	logSQLStatement   bool
+	includeParams     bool
 }
 
 type tracerConfig struct {
@@ -28,6 +30,7 @@ type tracerConfig struct {
 	attrs             []attribute.KeyValue
 	trimQuerySpanName bool
 	logSQLStatement   bool
+	includeParams     bool
 }
 
 // NewTracer returns a new Tracer.
@@ -39,6 +42,7 @@ func NewTracer(opts ...Option) *Tracer {
 		},
 		trimQuerySpanName: false,
 		logSQLStatement:   true,
+		includeParams:     false,
 	}
 
 	for _, opt := range opts {
@@ -50,6 +54,7 @@ func NewTracer(opts ...Option) *Tracer {
 		attrs:             cfg.attrs,
 		trimQuerySpanName: cfg.trimQuerySpanName,
 		logSQLStatement:   cfg.logSQLStatement,
+		includeParams:     cfg.includeParams,
 	}
 }
 
@@ -102,6 +107,9 @@ func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 
 	if t.logSQLStatement {
 		opts = append(opts, trace.WithAttributes(semconv.DBStatementKey.String(data.SQL)))
+		if t.includeParams {
+			opts = append(opts, trace.WithAttributes(makeParamsAttribute(data.Args)))
+		}
 	}
 
 	spanName := "query " + data.SQL
@@ -194,6 +202,10 @@ func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.T
 
 	if t.logSQLStatement {
 		opts = append(opts, trace.WithAttributes(semconv.DBStatementKey.String(data.SQL)))
+		if t.includeParams {
+			opts = append(opts, trace.WithAttributes(makeParamsAttribute(data.Args)))
+		}
+
 	}
 
 	spanName := "batch query " + data.SQL
@@ -282,4 +294,14 @@ func (t *Tracer) TracePrepareEnd(ctx context.Context, _ *pgx.Conn, data pgx.Trac
 	recordError(span, data.Err)
 
 	span.End()
+}
+
+func makeParamsAttribute(args []any) attribute.KeyValue {
+	ss := make([]string, len(args))
+	for i := range args {
+		ss[i] = fmt.Sprintf("%+v", args[i])
+	}
+	// Since there doesn't appear to be a standard key for this in semconv, prefix it to avoid
+	// clashing with future standard attributes.
+	return attribute.Key("pgx.db.params").StringSlice(ss)
 }
