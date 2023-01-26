@@ -42,10 +42,18 @@ func WithTrimSQLInSpanName() Option {
 	})
 }
 
-// WithDisableSQLStatementInBaggage will disable logging the SQL statement in
-// the span's baggage.
-func WithDisableSQLStatementInBaggage() Option {
+// WithDisableSQLStatementInAttributes will disable logging the SQL statement in the span's
+// attributes.
+func WithDisableSQLStatementInAttributes() Option {
 	return optionFunc(func(cfg *tracerConfig) {
 		cfg.logSQLStatement = false
+	})
+}
+
+// WithIncludeQueryParameters includes the SQL query parameters in the span attribute with key pgx.query.parameters.
+// This is implicitly disabled if WithDisableSQLStatementInAttributes is used.
+func WithIncludeQueryParameters() Option {
+	return optionFunc(func(cfg *tracerConfig) {
+		cfg.includeParams = true
 	})
 }
