@@ -303,5 +303,5 @@ func makeParamsAttribute(args []any) attribute.KeyValue {
 	}
 	// Since there doesn't appear to be a standard key for this in semconv, prefix it to avoid
 	// clashing with future standard attributes.
-	return attribute.Key("pgx.db.params").StringSlice(ss)
+	return attribute.Key("pgx.query.parameters").StringSlice(ss)
 }
