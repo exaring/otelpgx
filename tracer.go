@@ -15,6 +15,8 @@ import (
 	"github.com/exaring/otelpgx/internal"
 )
 
+var RowsAffectedKey = attribute.Key("pgx.rows_affected")
+
 // Tracer is a wrapper around the pgx tracer interfaces which instrument
 // queries.
 type Tracer struct {
@@ -127,6 +129,8 @@ func (t *Tracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQ
 	span := trace.SpanFromContext(ctx)
 	recordError(span, data.Err)
 
+	span.SetAttributes(RowsAffectedKey.Int(int(data.CommandTag.RowsAffected())))
+
 	span.End()
 }
 
@@ -157,6 +161,8 @@ func (t *Tracer) TraceCopyFromStart(ctx context.Context, conn *pgx.Conn, data pg
 func (t *Tracer) TraceCopyFromEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceCopyFromEndData) {
 	span := trace.SpanFromContext(ctx)
 	recordError(span, data.Err)
+
+	span.SetAttributes(RowsAffectedKey.Int(int(data.CommandTag.RowsAffected())))
 
 	span.End()
 }
