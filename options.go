@@ -42,9 +42,9 @@ func WithTrimSQLInSpanName() Option {
 	})
 }
 
-// WithDisableSQLStatementInBaggage will disable logging the SQL statement in
-// the span's baggage.
-func WithDisableSQLStatementInBaggage() Option {
+// WithDisableSQLStatementInAttributes will disable logging the SQL statement in the span's
+// attributes.
+func WithDisableSQLStatementInAttributes() Option {
 	return optionFunc(func(cfg *tracerConfig) {
 		cfg.logSQLStatement = false
 	})
