@@ -38,6 +38,10 @@ conn, err := pgxpool.NewConfig(ctx, cfg)
 if err != nil {
     return nil, fmt.Errorf("connect to database: %w", err)
 }
+
+if err := otelpgx.RecordStats(conn); err != nil {
+    return nil, fmt.Errorf("unable to record database stats: %w", err)
+}
 ```
 
 See [options.go](options.go) for the full list of options.
