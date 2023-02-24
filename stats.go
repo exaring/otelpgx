@@ -12,6 +12,7 @@ import (
 	"go.opentelemetry.io/otel/metric/global"
 	"go.opentelemetry.io/otel/metric/instrument"
 	"go.opentelemetry.io/otel/metric/unit"
+	semconv "go.opentelemetry.io/otel/semconv/v1.12.0"
 )
 
 // defaultMinimumReadDBStatsInterval is the default minimum interval between calls to db.Stats().
@@ -22,6 +23,9 @@ func RecordStats(db *pgxpool.Pool, opts ...StatsOption) error {
 	o := statsOptions{
 		meterProvider:              global.MeterProvider(),
 		minimumReadDBStatsInterval: defaultMinimumReadDBStatsInterval,
+		defaultAttributes: []attribute.KeyValue{
+			semconv.DBSystemPostgreSQL,
+		},
 	}
 
 	for _, opt := range opts {
