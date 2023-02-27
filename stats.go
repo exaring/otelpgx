@@ -46,18 +46,18 @@ func recordStats(
 	var (
 		err error
 
-		acquireCount                         instrument.Int64ObservableGauge
-		acquireDuration                      instrument.Float64ObservableGauge
-		acquiredConns                        instrument.Int64ObservableGauge
-		cancelledAcquires                    instrument.Int64ObservableGauge
-		constructingConns                    instrument.Int64ObservableGauge
-		emptyAcquires                        instrument.Int64ObservableGauge
-		idleConns                            instrument.Int64ObservableGauge
+		acquireCount                         instrument.Int64ObservableCounter
+		acquireDuration                      instrument.Float64ObservableCounter
+		acquiredConns                        instrument.Int64ObservableUpDownCounter
+		cancelledAcquires                    instrument.Int64ObservableCounter
+		constructingConns                    instrument.Int64ObservableUpDownCounter
+		emptyAcquires                        instrument.Int64ObservableCounter
+		idleConns                            instrument.Int64ObservableUpDownCounter
 		maxConns                             instrument.Int64ObservableGauge
-		maxIdleDestroyCount                  instrument.Int64ObservableGauge
-		maxLifetimeDestroyCountifetimeClosed instrument.Int64ObservableGauge
-		newConnsCount                        instrument.Int64ObservableGauge
-		totalConns                           instrument.Int64ObservableGauge
+		maxIdleDestroyCount                  instrument.Int64ObservableCounter
+		maxLifetimeDestroyCountifetimeClosed instrument.Int64ObservableCounter
+		newConnsCount                        instrument.Int64ObservableCounter
+		totalConns                           instrument.Int64ObservableUpDownCounter
 
 		dbStats     *pgxpool.Stat
 		lastDBStats time.Time
@@ -69,7 +69,7 @@ func recordStats(
 	lock.Lock()
 	defer lock.Unlock()
 
-	if acquireCount, err = meter.Int64ObservableGauge(
+	if acquireCount, err = meter.Int64ObservableCounter(
 		pgxPoolAcquireCount,
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Cumulative count of successful acquires from the pool."),
@@ -77,7 +77,7 @@ func recordStats(
 		return err
 	}
 
-	if acquireDuration, err = meter.Float64ObservableGauge(
+	if acquireDuration, err = meter.Float64ObservableCounter(
 		pgxpoolAcquireDuration,
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Total duration of all successful acquires from the pool in nanoseconds."),
@@ -85,7 +85,7 @@ func recordStats(
 		return err
 	}
 
-	if acquiredConns, err = meter.Int64ObservableGauge(
+	if acquiredConns, err = meter.Int64ObservableUpDownCounter(
 		pgxpoolAcquiredConns,
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Number of currently acquired connections in the pool."),
@@ -93,7 +93,7 @@ func recordStats(
 		return err
 	}
 
-	if cancelledAcquires, err = meter.Int64ObservableGauge(
+	if cancelledAcquires, err = meter.Int64ObservableCounter(
 		pgxpoolCancelledAcquires,
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Cumulative count of acquires from the pool that were canceled by a context."),
@@ -101,7 +101,7 @@ func recordStats(
 		return err
 	}
 
-	if constructingConns, err = meter.Int64ObservableGauge(
+	if constructingConns, err = meter.Int64ObservableUpDownCounter(
 		pgxpoolConstructingConns,
 		instrument.WithUnit(unit.Milliseconds),
 		instrument.WithDescription("Number of conns with construction in progress in the pool."),
@@ -109,7 +109,7 @@ func recordStats(
 		return err
 	}
 
-	if emptyAcquires, err = meter.Int64ObservableGauge(
+	if emptyAcquires, err = meter.Int64ObservableCounter(
 		pgxpoolEmptyAcquire,
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Cumulative count of successful acquires from the pool that waited for a resource to be released or constructed because the pool was empty."),
@@ -117,7 +117,7 @@ func recordStats(
 		return err
 	}
 
-	if idleConns, err = meter.Int64ObservableGauge(
+	if idleConns, err = meter.Int64ObservableUpDownCounter(
 		pgxpoolIdleConns,
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Number of currently idle conns in the pool."),
@@ -133,7 +133,7 @@ func recordStats(
 		return err
 	}
 
-	if maxIdleDestroyCount, err = meter.Int64ObservableGauge(
+	if maxIdleDestroyCount, err = meter.Int64ObservableCounter(
 		pgxpoolMaxIdleDestroyCount,
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Cumulative count of connections destroyed because they exceeded MaxConnIdleTime."),
@@ -141,7 +141,7 @@ func recordStats(
 		return err
 	}
 
-	if maxLifetimeDestroyCountifetimeClosed, err = meter.Int64ObservableGauge(
+	if maxLifetimeDestroyCountifetimeClosed, err = meter.Int64ObservableCounter(
 		pgxpoolMaxLifetimeDestroyCount,
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Cumulative count of connections destroyed because they exceeded MaxConnLifetime."),
@@ -149,7 +149,7 @@ func recordStats(
 		return err
 	}
 
-	if newConnsCount, err = meter.Int64ObservableGauge(
+	if newConnsCount, err = meter.Int64ObservableCounter(
 		pgxpoolNewConnsCount,
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Cumulative count of new connections opened."),
@@ -157,7 +157,7 @@ func recordStats(
 		return err
 	}
 
-	if totalConns, err = meter.Int64ObservableGauge(
+	if totalConns, err = meter.Int64ObservableUpDownCounter(
 		pgxpoolTotalConns,
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("Total number of resources currently in the pool. The value is the sum of ConstructingConns, AcquiredConns, and IdleConns."),
