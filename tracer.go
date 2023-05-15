@@ -23,6 +23,7 @@ type Tracer struct {
 	tracer            trace.Tracer
 	attrs             []attribute.KeyValue
 	trimQuerySpanName bool
+	spanNameFunc      SpanNameFunc
 	logSQLStatement   bool
 	includeParams     bool
 }
@@ -31,6 +32,7 @@ type tracerConfig struct {
 	tp                trace.TracerProvider
 	attrs             []attribute.KeyValue
 	trimQuerySpanName bool
+	spanNameFunc      SpanNameFunc
 	logSQLStatement   bool
 	includeParams     bool
 }
@@ -43,6 +45,7 @@ func NewTracer(opts ...Option) *Tracer {
 			semconv.DBSystemPostgreSQL,
 		},
 		trimQuerySpanName: false,
+		spanNameFunc:      nil,
 		logSQLStatement:   true,
 		includeParams:     false,
 	}
@@ -55,6 +58,7 @@ func NewTracer(opts ...Option) *Tracer {
 		tracer:            cfg.tp.Tracer(internal.TracerName, trace.WithInstrumentationVersion(internal.InstrumentationVersion)),
 		attrs:             cfg.attrs,
 		trimQuerySpanName: cfg.trimQuerySpanName,
+		spanNameFunc:      cfg.spanNameFunc,
 		logSQLStatement:   cfg.logSQLStatement,
 		includeParams:     cfg.includeParams,
 	}
@@ -71,8 +75,15 @@ const sqlOperationUnknkown = "UNKNOWN"
 
 // sqlOperationName attempts to get the first 'word' from a given SQL query, which usually
 // is the operation name (e.g. 'SELECT').
-func sqlOperationName(query string) string {
-	parts := strings.Fields(query)
+func sqlOperationName(stmt string, fn func(string) string) string {
+	// If a custom function is provided, use that. Otherwise, fall back to the
+	// default implementation. This allows users to override the default
+	// behavior without having to reimplement it.
+	if fn != nil {
+		return fn(stmt)
+	}
+
+	parts := strings.Fields(stmt)
 	if len(parts) == 0 {
 		// Fall back to a fixed value to prevent creating lots of tracing operations
 		// differing only by the amount of whitespace in them (in case we'd fall back
@@ -116,7 +127,7 @@ func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 
 	spanName := "query " + data.SQL
 	if t.trimQuerySpanName {
-		spanName = "query " + sqlOperationName(data.SQL)
+		spanName = "query " + sqlOperationName(data.SQL, t.spanNameFunc)
 	}
 
 	ctx, _ = t.tracer.Start(ctx, spanName, opts...)
@@ -216,7 +227,7 @@ func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.T
 
 	spanName := "batch query " + data.SQL
 	if t.trimQuerySpanName {
-		spanName = "query " + sqlOperationName(data.SQL)
+		spanName = "query " + sqlOperationName(data.SQL, t.spanNameFunc)
 	}
 
 	_, span := t.tracer.Start(ctx, spanName, opts...)
@@ -286,7 +297,7 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 
 	spanName := "prepare " + data.SQL
 	if t.trimQuerySpanName {
-		spanName = "prepare " + sqlOperationName(data.SQL)
+		spanName = "prepare " + sqlOperationName(data.SQL, t.spanNameFunc)
 	}
 
 	ctx, _ = t.tracer.Start(ctx, spanName, opts...)
