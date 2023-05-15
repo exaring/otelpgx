@@ -34,19 +34,49 @@ func TestSqlOperationName(t *testing.T) {
 			name:         "Whitespace-only query",
 			query:        " \n\t",
 			spanNameFunc: nil,
-			expName:      "UNKNOWN",
+			expName:      sqlOperationUnknkown,
 		},
 		{
 			name:         "Empty query",
 			query:        "",
 			spanNameFunc: nil,
-			expName:      "UNKNOWN",
+			expName:      sqlOperationUnknkown,
 		},
 		{
-			name:         "Custom SQL name query",
+			name:         "Functional span name (-- comment style)",
 			query:        "-- name: GetUsers :many\nSELECT * FROM users",
 			spanNameFunc: defaultSpanNameFunc(),
 			expName:      "GetUsers :many",
+		},
+		{
+			name:         "Functional span name (/**/ comment style)",
+			query:        "/* name: GetBooks :many */\nSELECT * FROM books",
+			spanNameFunc: defaultSpanNameFunc(),
+			expName:      "GetBooks :many",
+		},
+		{
+			name:         "Functional span name (# comment style)",
+			query:        "# name: GetRecords :many\nSELECT * FROM records",
+			spanNameFunc: defaultSpanNameFunc(),
+			expName:      "GetRecords :many",
+		},
+		{
+			name:         "Functional span name (no annotation)",
+			query:        "--\nSELECT * FROM user",
+			spanNameFunc: defaultSpanNameFunc(),
+			expName:      sqlOperationUnknkown,
+		},
+		{
+			name:         "Custom SQL name query (normal comment)",
+			query:        "-- foo \nSELECT * FROM users",
+			spanNameFunc: defaultSpanNameFunc(),
+			expName:      sqlOperationUnknkown,
+		},
+		{
+			name:         "Custom SQL name query (invalid formatting)",
+			query:        "foo \nSELECT * FROM users",
+			spanNameFunc: defaultSpanNameFunc(),
+			expName:      sqlOperationUnknkown,
 		},
 	}
 
@@ -60,6 +90,8 @@ func TestSqlOperationName(t *testing.T) {
 	}
 }
 
+// defaultSpanNameFunc is an utility fucntion for testing that attempts to get
+// the first name of the query from a given SQL statement.
 func defaultSpanNameFunc() SpanNameFunc {
 	return func(query string) string {
 		for _, line := range strings.Split(query, "\n") {
