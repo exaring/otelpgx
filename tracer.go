@@ -75,12 +75,12 @@ const sqlOperationUnknkown = "UNKNOWN"
 
 // sqlOperationName attempts to get the first 'word' from a given SQL query, which usually
 // is the operation name (e.g. 'SELECT').
-func sqlOperationName(stmt string, fn func(string) string) string {
+func (t *Tracer) sqlOperationName(stmt string) string {
 	// If a custom function is provided, use that. Otherwise, fall back to the
 	// default implementation. This allows users to override the default
 	// behavior without having to reimplement it.
-	if fn != nil {
-		return fn(stmt)
+	if t.spanNameFunc != nil {
+		return t.spanNameFunc(stmt)
 	}
 
 	parts := strings.Fields(stmt)
@@ -127,7 +127,7 @@ func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 
 	spanName := "query " + data.SQL
 	if t.trimQuerySpanName {
-		spanName = "query " + sqlOperationName(data.SQL, t.spanNameFunc)
+		spanName = "query " + t.sqlOperationName(data.SQL)
 	}
 
 	ctx, _ = t.tracer.Start(ctx, spanName, opts...)
@@ -227,7 +227,7 @@ func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.T
 
 	spanName := "batch query " + data.SQL
 	if t.trimQuerySpanName {
-		spanName = "query " + sqlOperationName(data.SQL, t.spanNameFunc)
+		spanName = "query " + t.sqlOperationName(data.SQL)
 	}
 
 	_, span := t.tracer.Start(ctx, spanName, opts...)
@@ -297,7 +297,7 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 
 	spanName := "prepare " + data.SQL
 	if t.trimQuerySpanName {
-		spanName = "prepare " + sqlOperationName(data.SQL, t.spanNameFunc)
+		spanName = "prepare " + t.sqlOperationName(data.SQL)
 	}
 
 	ctx, _ = t.tracer.Start(ctx, spanName, opts...)
