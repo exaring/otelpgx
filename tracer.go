@@ -93,13 +93,15 @@ func (t *Tracer) sqlOperationName(stmt string) string {
 	return strings.ToUpper(parts[0])
 }
 
-func appendConnectionAttributes(config *pgx.ConnConfig, opts []trace.SpanStartOption) {
+func appendConnectionAttributes(config *pgx.ConnConfig) []trace.SpanStartOption {
 	if config != nil {
-		opts = append(opts,
+		return []trace.SpanStartOption{
 			trace.WithAttributes(attribute.String(string(semconv.NetPeerNameKey), config.Host)),
 			trace.WithAttributes(attribute.Int(string(semconv.NetPeerPortKey), int(config.Port))),
-			trace.WithAttributes(attribute.String(string(semconv.DBUserKey), config.User)))
+			trace.WithAttributes(attribute.String(string(semconv.DBUserKey), config.User)),
+		}
 	}
+	return nil
 }
 
 // TraceQueryStart is called at the beginning of Query, QueryRow, and Exec calls.
@@ -115,7 +117,7 @@ func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 	}
 
 	if conn != nil {
-		appendConnectionAttributes(conn.Config(), opts)
+		opts = append(opts, appendConnectionAttributes(conn.Config())...)
 	}
 
 	if t.logSQLStatement {
@@ -160,7 +162,7 @@ func (t *Tracer) TraceCopyFromStart(ctx context.Context, conn *pgx.Conn, data pg
 	}
 
 	if conn != nil {
-		appendConnectionAttributes(conn.Config(), opts)
+		opts = append(opts, appendConnectionAttributes(conn.Config())...)
 	}
 
 	ctx, _ = t.tracer.Start(ctx, "copy_from "+data.TableName.Sanitize(), opts...)
@@ -198,7 +200,7 @@ func (t *Tracer) TraceBatchStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 	}
 
 	if conn != nil {
-		appendConnectionAttributes(conn.Config(), opts)
+		opts = append(opts, appendConnectionAttributes(conn.Config())...)
 	}
 
 	ctx, _ = t.tracer.Start(ctx, "batch start", opts...)
@@ -214,7 +216,7 @@ func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.T
 	}
 
 	if conn != nil {
-		appendConnectionAttributes(conn.Config(), opts)
+		opts = append(opts, appendConnectionAttributes(conn.Config())...)
 	}
 
 	if t.logSQLStatement {
@@ -258,7 +260,7 @@ func (t *Tracer) TraceConnectStart(ctx context.Context, data pgx.TraceConnectSta
 	}
 
 	if data.ConnConfig != nil {
-		appendConnectionAttributes(data.ConnConfig, opts)
+		opts = append(opts, appendConnectionAttributes(data.ConnConfig)...)
 	}
 
 	ctx, _ = t.tracer.Start(ctx, "connect", opts...)
@@ -288,7 +290,7 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 	}
 
 	if conn != nil {
-		appendConnectionAttributes(conn.Config(), opts)
+		opts = append(opts, appendConnectionAttributes(conn.Config())...)
 	}
 
 	if t.logSQLStatement {
