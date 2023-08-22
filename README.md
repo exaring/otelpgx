@@ -34,7 +34,7 @@ if err != nil {
 
 cfg.ConnConfig.Tracer = otelpgx.NewTracer()
 
-conn, err := pgxpool.NewConfig(ctx, cfg)
+conn, err := pgxpool.NewWithConfig(ctx, cfg)
 if err != nil {
     return nil, fmt.Errorf("connect to database: %w", err)
 }
