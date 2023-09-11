@@ -34,13 +34,13 @@ func TestTracer_sqlOperationName(t *testing.T) {
 			name:    "Whitespace-only query",
 			query:   " \n\t",
 			tracer:  NewTracer(),
-			expName: sqlOperationUnknkown,
+			expName: sqlOperationUnknown,
 		},
 		{
 			name:    "Empty query",
 			query:   "",
 			tracer:  NewTracer(),
-			expName: sqlOperationUnknkown,
+			expName: sqlOperationUnknown,
 		},
 		{
 			name:    "Functional span name (-- comment style)",
@@ -64,19 +64,19 @@ func TestTracer_sqlOperationName(t *testing.T) {
 			name:    "Functional span name (no annotation)",
 			query:   "--\nSELECT * FROM user",
 			tracer:  NewTracer(WithSpanNameFunc(defaultSpanNameFunc)),
-			expName: sqlOperationUnknkown,
+			expName: sqlOperationUnknown,
 		},
 		{
 			name:    "Custom SQL name query (normal comment)",
 			query:   "-- foo \nSELECT * FROM users",
 			tracer:  NewTracer(WithSpanNameFunc(defaultSpanNameFunc)),
-			expName: sqlOperationUnknkown,
+			expName: sqlOperationUnknown,
 		},
 		{
 			name:    "Custom SQL name query (invalid formatting)",
 			query:   "foo \nSELECT * FROM users",
 			tracer:  NewTracer(WithSpanNameFunc(defaultSpanNameFunc)),
-			expName: sqlOperationUnknkown,
+			expName: sqlOperationUnknown,
 		},
 	}
 	for _, tt := range tests {
@@ -115,7 +115,7 @@ var defaultSpanNameFunc SpanNameFunc = func(query string) string {
 			continue
 		}
 		if !strings.HasPrefix(rest, " name: ") {
-			return sqlOperationUnknkown
+			return sqlOperationUnknown
 		}
 
 		part := strings.Split(strings.TrimSpace(line), " ")
@@ -123,7 +123,7 @@ var defaultSpanNameFunc SpanNameFunc = func(query string) string {
 			part = part[:len(part)-1] // removes the trailing "*/" element
 		}
 		if len(part) == 2 {
-			return sqlOperationUnknkown
+			return sqlOperationUnknown
 		}
 
 		queryName := part[2]
@@ -131,5 +131,5 @@ var defaultSpanNameFunc SpanNameFunc = func(query string) string {
 
 		return queryName + " " + queryType
 	}
-	return sqlOperationUnknkown
+	return sqlOperationUnknown
 }
