@@ -2,6 +2,8 @@ package otelpgx
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -9,13 +11,20 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	semconv "go.opentelemetry.io/otel/semconv/v1.12.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/exaring/otelpgx/internal"
 )
 
-var RowsAffectedKey = attribute.Key("pgx.rows_affected")
+const (
+	// RowsAffectedKey represents the number of rows affected.
+	RowsAffectedKey = attribute.Key("pgx.rows_affected")
+	// QueryParametersKey represents the query parameters.
+	QueryParametersKey = attribute.Key("pgx.query.parameters")
+	// BatchSizeKey represents the batch size.
+	BatchSizeKey = attribute.Key("pgx.batch.size")
+)
 
 // Tracer is a wrapper around the pgx tracer interfaces which instrument
 // queries.
@@ -65,13 +74,13 @@ func NewTracer(opts ...Option) *Tracer {
 }
 
 func recordError(span trace.Span, err error) {
-	if err != nil {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 	}
 }
 
-const sqlOperationUnknkown = "UNKNOWN"
+const sqlOperationUnknown = "UNKNOWN"
 
 // sqlOperationName attempts to get the first 'word' from a given SQL query, which usually
 // is the operation name (e.g. 'SELECT').
@@ -88,7 +97,7 @@ func (t *Tracer) sqlOperationName(stmt string) string {
 		// Fall back to a fixed value to prevent creating lots of tracing operations
 		// differing only by the amount of whitespace in them (in case we'd fall back
 		// to the full query or a cut-off version).
-		return sqlOperationUnknkown
+		return sqlOperationUnknown
 	}
 	return strings.ToUpper(parts[0])
 }
@@ -98,9 +107,11 @@ func (t *Tracer) sqlOperationName(stmt string) string {
 func connectionAttributesFromConfig(config *pgx.ConnConfig) []trace.SpanStartOption {
 	if config != nil {
 		return []trace.SpanStartOption{
-			trace.WithAttributes(attribute.String(string(semconv.NetPeerNameKey), config.Host)),
-			trace.WithAttributes(attribute.Int(string(semconv.NetPeerPortKey), int(config.Port))),
-			trace.WithAttributes(attribute.String(string(semconv.DBUserKey), config.User)),
+			trace.WithAttributes(
+				semconv.NetPeerName(config.Host),
+				semconv.NetPeerPort(int(config.Port)),
+				semconv.DBUser(config.User),
+			),
 		}
 	}
 	return nil
@@ -123,7 +134,7 @@ func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 	}
 
 	if t.logSQLStatement {
-		opts = append(opts, trace.WithAttributes(semconv.DBStatementKey.String(data.SQL)))
+		opts = append(opts, trace.WithAttributes(semconv.DBStatement(data.SQL)))
 		if t.includeParams {
 			opts = append(opts, trace.WithAttributes(makeParamsAttribute(data.Args)))
 		}
@@ -144,7 +155,9 @@ func (t *Tracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQ
 	span := trace.SpanFromContext(ctx)
 	recordError(span, data.Err)
 
-	span.SetAttributes(RowsAffectedKey.Int(int(data.CommandTag.RowsAffected())))
+	if data.Err != nil {
+		span.SetAttributes(RowsAffectedKey.Int64(data.CommandTag.RowsAffected()))
+	}
 
 	span.End()
 }
@@ -160,7 +173,7 @@ func (t *Tracer) TraceCopyFromStart(ctx context.Context, conn *pgx.Conn, data pg
 	opts := []trace.SpanStartOption{
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(t.attrs...),
-		trace.WithAttributes(attribute.String("db.table", data.TableName.Sanitize())),
+		trace.WithAttributes(semconv.DBSQLTable(data.TableName.Sanitize())),
 	}
 
 	if conn != nil {
@@ -177,7 +190,9 @@ func (t *Tracer) TraceCopyFromEnd(ctx context.Context, _ *pgx.Conn, data pgx.Tra
 	span := trace.SpanFromContext(ctx)
 	recordError(span, data.Err)
 
-	span.SetAttributes(RowsAffectedKey.Int(int(data.CommandTag.RowsAffected())))
+	if data.Err != nil {
+		span.SetAttributes(RowsAffectedKey.Int64(data.CommandTag.RowsAffected()))
+	}
 
 	span.End()
 }
@@ -198,7 +213,7 @@ func (t *Tracer) TraceBatchStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 	opts := []trace.SpanStartOption{
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(t.attrs...),
-		trace.WithAttributes(attribute.Int("pgx.batch.size", size)),
+		trace.WithAttributes(BatchSizeKey.Int(size)),
 	}
 
 	if conn != nil {
@@ -222,7 +237,7 @@ func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.T
 	}
 
 	if t.logSQLStatement {
-		opts = append(opts, trace.WithAttributes(semconv.DBStatementKey.String(data.SQL)))
+		opts = append(opts, trace.WithAttributes(semconv.DBStatement(data.SQL)))
 		if t.includeParams {
 			opts = append(opts, trace.WithAttributes(makeParamsAttribute(data.Args)))
 		}
@@ -296,7 +311,7 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 	}
 
 	if t.logSQLStatement {
-		opts = append(opts, trace.WithAttributes(semconv.DBStatementKey.String(data.SQL)))
+		opts = append(opts, trace.WithAttributes(semconv.DBStatement(data.SQL)))
 	}
 
 	spanName := "prepare " + data.SQL
@@ -322,7 +337,5 @@ func makeParamsAttribute(args []any) attribute.KeyValue {
 	for i := range args {
 		ss[i] = fmt.Sprintf("%+v", args[i])
 	}
-	// Since there doesn't appear to be a standard key for this in semconv, prefix it to avoid
-	// clashing with future standard attributes.
-	return attribute.Key("pgx.query.parameters").StringSlice(ss)
+	return QueryParametersKey.StringSlice(ss)
 }
