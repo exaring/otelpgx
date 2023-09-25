@@ -24,6 +24,8 @@ const (
 	QueryParametersKey = attribute.Key("pgx.query.parameters")
 	// BatchSizeKey represents the batch size.
 	BatchSizeKey = attribute.Key("pgx.batch.size")
+	// PrepareStmtNameKey represents the prepared statement name.
+	PrepareStmtNameKey = attribute.Key("pgx.prepare_stmt.name")
 )
 
 // Tracer is a wrapper around the pgx tracer interfaces which instrument
@@ -304,6 +306,7 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 	opts := []trace.SpanStartOption{
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(t.attrs...),
+		trace.WithAttributes(PrepareStmtNameKey.String(data.Name)),
 	}
 
 	if conn != nil {
