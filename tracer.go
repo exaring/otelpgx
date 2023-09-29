@@ -306,6 +306,9 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 	opts := []trace.SpanStartOption{
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(t.attrs...),
+	}
+	
+	if data.Name != "" {
 		trace.WithAttributes(PrepareStmtNameKey.String(data.Name)),
 	}
 
