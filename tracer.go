@@ -309,7 +309,7 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 	}
 	
 	if data.Name != "" {
-		trace.WithAttributes(PrepareStmtNameKey.String(data.Name)),
+		trace.WithAttributes(PrepareStmtNameKey.String(data.Name))
 	}
 
 	if conn != nil {
