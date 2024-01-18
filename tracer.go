@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -26,6 +27,9 @@ const (
 	BatchSizeKey = attribute.Key("pgx.batch.size")
 	// PrepareStmtNameKey represents the prepared statement name.
 	PrepareStmtNameKey = attribute.Key("pgx.prepare_stmt.name")
+	// SQLStateKey represents PostgreSQL error code,
+	// see https://www.postgresql.org/docs/current/errcodes-appendix.html.
+	SQLStateKey = attribute.Key("pgx.sql_state")
 )
 
 // Tracer is a wrapper around the pgx tracer interfaces which instrument
@@ -79,6 +83,11 @@ func recordError(span trace.Span, err error) {
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
+
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) {
+			span.SetAttributes(SQLStateKey.String(pgErr.Code))
+		}
 	}
 }
 
@@ -307,7 +316,7 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(t.attrs...),
 	}
-	
+
 	if data.Name != "" {
 		trace.WithAttributes(PrepareStmtNameKey.String(data.Name))
 	}
