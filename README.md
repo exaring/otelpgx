@@ -12,12 +12,6 @@ instrumentation for the [jackc/pgx](https://github.com/jackc/pgx) library.
 
 ## Usage
 
-Make sure you have a suitable pgx version:
-
-```bash
-go get github.com/jackc/pgx/v5
-```
-
 Install the library:
 
 ```go
