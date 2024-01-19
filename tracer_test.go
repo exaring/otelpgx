@@ -97,10 +97,8 @@ var defaultSpanNameFunc SpanNameFunc = func(query string) string {
 		switch {
 		case strings.HasPrefix(line, "--"):
 			prefix = "--"
-
 		case strings.HasPrefix(line, "/*"):
 			prefix = "/*"
-
 		case strings.HasPrefix(line, "#"):
 			prefix = "#"
 		default:

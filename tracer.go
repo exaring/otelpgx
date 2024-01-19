@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -14,8 +15,12 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
 	"go.opentelemetry.io/otel/trace"
+)
 
-	"github.com/exaring/otelpgx/internal"
+const (
+	tracerName = "github.com/exaring/otelpgx"
+
+	sqlOperationUnknown = "UNKNOWN"
 )
 
 const (
@@ -70,7 +75,7 @@ func NewTracer(opts ...Option) *Tracer {
 	}
 
 	return &Tracer{
-		tracer:            cfg.tp.Tracer(internal.TracerName, trace.WithInstrumentationVersion(internal.InstrumentationVersion)),
+		tracer:            cfg.tp.Tracer(tracerName, trace.WithInstrumentationVersion(findOwnImportedVersion())),
 		attrs:             cfg.attrs,
 		trimQuerySpanName: cfg.trimQuerySpanName,
 		spanNameFunc:      cfg.spanNameFunc,
@@ -90,8 +95,6 @@ func recordError(span trace.Span, err error) {
 		}
 	}
 }
-
-const sqlOperationUnknown = "UNKNOWN"
 
 // sqlOperationName attempts to get the first 'word' from a given SQL query, which usually
 // is the operation name (e.g. 'SELECT').
@@ -353,4 +356,17 @@ func makeParamsAttribute(args []any) attribute.KeyValue {
 		ss[i] = fmt.Sprintf("%+v", args[i])
 	}
 	return QueryParametersKey.StringSlice(ss)
+}
+
+func findOwnImportedVersion() string {
+	buildInfo, ok := debug.ReadBuildInfo()
+	if ok {
+		for _, dep := range buildInfo.Deps {
+			if dep.Path == tracerName {
+				return dep.Version
+			}
+		}
+	}
+
+	return "unknown"
 }
