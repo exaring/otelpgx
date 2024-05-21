@@ -169,7 +169,7 @@ func (t *Tracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQ
 	span := trace.SpanFromContext(ctx)
 	recordError(span, data.Err)
 
-	if data.Err != nil {
+	if data.Err == nil {
 		span.SetAttributes(RowsAffectedKey.Int64(data.CommandTag.RowsAffected()))
 	}
 
@@ -204,7 +204,7 @@ func (t *Tracer) TraceCopyFromEnd(ctx context.Context, _ *pgx.Conn, data pgx.Tra
 	span := trace.SpanFromContext(ctx)
 	recordError(span, data.Err)
 
-	if data.Err != nil {
+	if data.Err == nil {
 		span.SetAttributes(RowsAffectedKey.Int64(data.CommandTag.RowsAffected()))
 	}
 
