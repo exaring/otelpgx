@@ -57,6 +57,14 @@ func WithSpanNameFunc(fn SpanNameFunc) Option {
 	})
 }
 
+// WithDisableQuerySpanNamePrefix will disable the default prefix for the span
+// name. By default, the span name is prefixed with "batch query" or "query".
+func WithDisableQuerySpanNamePrefix() Option {
+	return optionFunc(func(cfg *tracerConfig) {
+		cfg.prefixQuerySpanName = false
+	})
+}
+
 // WithDisableSQLStatementInAttributes will disable logging the SQL statement in the span's
 // attributes.
 func WithDisableSQLStatementInAttributes() Option {
