@@ -40,21 +40,23 @@ const (
 // Tracer is a wrapper around the pgx tracer interfaces which instrument
 // queries.
 type Tracer struct {
-	tracer            trace.Tracer
-	attrs             []attribute.KeyValue
-	trimQuerySpanName bool
-	spanNameFunc      SpanNameFunc
-	logSQLStatement   bool
-	includeParams     bool
+	tracer              trace.Tracer
+	attrs               []attribute.KeyValue
+	trimQuerySpanName   bool
+	spanNameFunc        SpanNameFunc
+	prefixQuerySpanName bool
+	logSQLStatement     bool
+	includeParams       bool
 }
 
 type tracerConfig struct {
-	tp                trace.TracerProvider
-	attrs             []attribute.KeyValue
-	trimQuerySpanName bool
-	spanNameFunc      SpanNameFunc
-	logSQLStatement   bool
-	includeParams     bool
+	tp                  trace.TracerProvider
+	attrs               []attribute.KeyValue
+	trimQuerySpanName   bool
+	spanNameFunc        SpanNameFunc
+	prefixQuerySpanName bool
+	logSQLStatement     bool
+	includeParams       bool
 }
 
 // NewTracer returns a new Tracer.
@@ -64,10 +66,11 @@ func NewTracer(opts ...Option) *Tracer {
 		attrs: []attribute.KeyValue{
 			semconv.DBSystemPostgreSQL,
 		},
-		trimQuerySpanName: false,
-		spanNameFunc:      nil,
-		logSQLStatement:   true,
-		includeParams:     false,
+		trimQuerySpanName:   false,
+		spanNameFunc:        nil,
+		prefixQuerySpanName: true,
+		logSQLStatement:     true,
+		includeParams:       false,
 	}
 
 	for _, opt := range opts {
@@ -75,12 +78,13 @@ func NewTracer(opts ...Option) *Tracer {
 	}
 
 	return &Tracer{
-		tracer:            cfg.tp.Tracer(tracerName, trace.WithInstrumentationVersion(findOwnImportedVersion())),
-		attrs:             cfg.attrs,
-		trimQuerySpanName: cfg.trimQuerySpanName,
-		spanNameFunc:      cfg.spanNameFunc,
-		logSQLStatement:   cfg.logSQLStatement,
-		includeParams:     cfg.includeParams,
+		tracer:              cfg.tp.Tracer(tracerName, trace.WithInstrumentationVersion(findOwnImportedVersion())),
+		attrs:               cfg.attrs,
+		trimQuerySpanName:   cfg.trimQuerySpanName,
+		spanNameFunc:        cfg.spanNameFunc,
+		prefixQuerySpanName: cfg.prefixQuerySpanName,
+		logSQLStatement:     cfg.logSQLStatement,
+		includeParams:       cfg.includeParams,
 	}
 }
 
@@ -258,9 +262,17 @@ func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.T
 
 	}
 
-	spanName := "batch query " + data.SQL
+	var spanName string
 	if t.trimQuerySpanName {
-		spanName = "query " + t.sqlOperationName(data.SQL)
+		spanName = t.sqlOperationName(data.SQL)
+		if t.prefixQuerySpanName {
+			spanName = "query " + spanName
+		}
+	} else {
+		spanName = data.SQL
+		if t.prefixQuerySpanName {
+			spanName = "batch query " + spanName
+		}
 	}
 
 	_, span := t.tracer.Start(ctx, spanName, opts...)
