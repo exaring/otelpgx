@@ -158,9 +158,12 @@ func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 		}
 	}
 
-	spanName := "query " + data.SQL
+	spanName := data.SQL
 	if t.trimQuerySpanName {
-		spanName = "query " + t.sqlOperationName(data.SQL)
+		spanName = t.sqlOperationName(data.SQL)
+	}
+	if t.prefixQuerySpanName {
+		spanName = "query " + spanName
 	}
 
 	ctx, _ = t.tracer.Start(ctx, spanName, opts...)
@@ -344,9 +347,12 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 		opts = append(opts, trace.WithAttributes(semconv.DBStatement(data.SQL)))
 	}
 
-	spanName := "prepare " + data.SQL
+	spanName := data.SQL
 	if t.trimQuerySpanName {
-		spanName = "prepare " + t.sqlOperationName(data.SQL)
+		spanName = t.sqlOperationName(data.SQL)
+	}
+	if t.prefixQuerySpanName {
+		spanName = "prepare " + spanName
 	}
 
 	ctx, _ = t.tracer.Start(ctx, spanName, opts...)
