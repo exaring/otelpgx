@@ -1,16 +1,23 @@
 package otelpgx
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
 
+type ctxKey string
+
+const sqlName = ctxKey("sql_name")
+
 func TestTracer_sqlOperationName(t *testing.T) {
+	someCtx := context.WithValue(context.Background(), sqlName, "query name")
 	tests := []struct {
 		name    string
 		tracer  *Tracer
 		query   string
 		expName string
+		ctx     *context.Context
 	}{
 		{
 			name:    "Spaces only",
@@ -78,11 +85,22 @@ func TestTracer_sqlOperationName(t *testing.T) {
 			tracer:  NewTracer(WithSpanNameFunc(defaultSpanNameFunc)),
 			expName: sqlOperationUnknown,
 		},
+		{
+			name:    "Custom SQL name query (invalid formatting)",
+			query:   "foo \nSELECT * FROM users",
+			tracer:  NewTracer(WithSpanNameFunc(defaultSpanNameFunc)),
+			ctx:     &someCtx,
+			expName: "query name",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tr := tt.tracer
-			if got := tr.sqlOperationName(tt.query); got != tt.expName {
+			ctx := context.Background()
+			if tt.ctx != nil {
+				ctx = *tt.ctx
+			}
+			if got := tr.sqlOperationName(ctx, tt.query); got != tt.expName {
 				t.Errorf("Tracer.sqlOperationName() = %v, want %v", got, tt.expName)
 			}
 		})
@@ -91,7 +109,10 @@ func TestTracer_sqlOperationName(t *testing.T) {
 
 // defaultSpanNameFunc is an utility function for testing that attempts to get
 // the first name of the query from a given SQL statement.
-var defaultSpanNameFunc SpanNameFunc = func(query string) string {
+var defaultSpanNameFunc SpanNameFunc = func(ctx context.Context, query string) string {
+	if sqlName, ok := ctx.Value(sqlName).(string); ok {
+		return sqlName
+	}
 	for _, line := range strings.Split(query, "\n") {
 		var prefix string
 		switch {

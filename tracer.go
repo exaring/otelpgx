@@ -102,12 +102,12 @@ func recordError(span trace.Span, err error) {
 
 // sqlOperationName attempts to get the first 'word' from a given SQL query, which usually
 // is the operation name (e.g. 'SELECT').
-func (t *Tracer) sqlOperationName(stmt string) string {
+func (t *Tracer) sqlOperationName(ctx context.Context, stmt string) string {
 	// If a custom function is provided, use that. Otherwise, fall back to the
 	// default implementation. This allows users to override the default
 	// behavior without having to reimplement it.
 	if t.spanNameFunc != nil {
-		return t.spanNameFunc(stmt)
+		return t.spanNameFunc(ctx, stmt)
 	}
 
 	parts := strings.Fields(stmt)
@@ -160,7 +160,7 @@ func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 
 	spanName := data.SQL
 	if t.trimQuerySpanName {
-		spanName = t.sqlOperationName(data.SQL)
+		spanName = t.sqlOperationName(ctx, data.SQL)
 	}
 	if t.prefixQuerySpanName {
 		spanName = "query " + spanName
@@ -271,7 +271,7 @@ func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.T
 
 	var spanName string
 	if t.trimQuerySpanName {
-		spanName = t.sqlOperationName(data.SQL)
+		spanName = t.sqlOperationName(ctx, data.SQL)
 		if t.prefixQuerySpanName {
 			spanName = "query " + spanName
 		}
@@ -353,7 +353,7 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 
 	spanName := data.SQL
 	if t.trimQuerySpanName {
-		spanName = t.sqlOperationName(data.SQL)
+		spanName = t.sqlOperationName(ctx, data.SQL)
 	}
 	if t.prefixQuerySpanName {
 		spanName = "prepare " + spanName
