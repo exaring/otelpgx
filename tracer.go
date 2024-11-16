@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -58,6 +59,8 @@ type tracerConfig struct {
 	logSQLStatement     bool
 	includeParams       bool
 }
+
+var _ pgxpool.AcquireTracer = (*Tracer)(nil)
 
 // NewTracer returns a new Tracer.
 func NewTracer(opts ...Option) *Tracer {
@@ -366,6 +369,35 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 
 // TracePrepareEnd is called at the end of Prepare calls.
 func (t *Tracer) TracePrepareEnd(ctx context.Context, _ *pgx.Conn, data pgx.TracePrepareEndData) {
+	span := trace.SpanFromContext(ctx)
+	recordError(span, data.Err)
+
+	span.End()
+}
+
+// TraceAcquireStart is called at the beginning of Acquire.
+// The returned context is used for the rest of the call and will be passed to the TraceAcquireEnd.
+func (t *Tracer) TraceAcquireStart(ctx context.Context, pool *pgxpool.Pool, data pgxpool.TraceAcquireStartData) context.Context {
+	if !trace.SpanFromContext(ctx).IsRecording() {
+		return ctx
+	}
+
+	opts := []trace.SpanStartOption{
+		trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(t.attrs...),
+	}
+
+	if pool != nil && pool.Config() != nil && pool.Config().ConnConfig != nil {
+		opts = append(opts, connectionAttributesFromConfig(pool.Config().ConnConfig)...)
+	}
+
+	ctx, _ = t.tracer.Start(ctx, "pool.acquire", opts...)
+
+	return ctx
+}
+
+// TraceAcquireEnd is called when a connection has been acquired.
+func (t *Tracer) TraceAcquireEnd(ctx context.Context, _ *pgxpool.Pool, data pgxpool.TraceAcquireEndData) {
 	span := trace.SpanFromContext(ctx)
 	recordError(span, data.Err)
 
