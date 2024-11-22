@@ -2,15 +2,21 @@
 
 # otelpgx
 
-Provides [OpenTelemetry](https://github.com/open-telemetry/opentelemetry-go) 
+Provides [OpenTelemetry](https://github.com/open-telemetry/opentelemetry-go)
 instrumentation for the [jackc/pgx](https://github.com/jackc/pgx) library.
 
 ## Requirements
 
-- go 1.18 (or higher)
+- go 1.22 (or higher)
 - pgx v5 (or higher)
 
 ## Usage
+
+Make sure you have a suitable pgx version:
+
+```bash
+go get github.com/jackc/pgx/v5
+```
 
 Install the library:
 
@@ -28,9 +34,13 @@ if err != nil {
 
 cfg.ConnConfig.Tracer = otelpgx.NewTracer()
 
-conn, err := pgxpool.NewWithConfig(ctx, cfg)
+conn, err := pgxpool.NewConfig(ctx, cfg)
 if err != nil {
     return nil, fmt.Errorf("connect to database: %w", err)
+}
+
+if err := otelpgx.RecordStats(conn); err != nil {
+    return nil, fmt.Errorf("unable to record database stats: %w", err)
 }
 ```
 
