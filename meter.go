@@ -63,7 +63,7 @@ func recordStats(
 
 		// Asynchronous Observable Metrics
 		acquireCount            metric.Int64ObservableCounter
-		acquireDuration         metric.Float64ObservableCounter
+		acquireDuration         metric.Int64ObservableCounter
 		acquiredConns           metric.Int64ObservableUpDownCounter
 		cancelledAcquires       metric.Int64ObservableCounter
 		constructingConns       metric.Int64ObservableUpDownCounter
@@ -99,9 +99,10 @@ func recordStats(
 		return err
 	}
 
-	if acquireDuration, err = meter.Float64ObservableCounter(
+	if acquireDuration, err = meter.Int64ObservableCounter(
 		pgxPoolAcquireDuration,
 		metric.WithDescription("Total duration of all successful acquires from the pool in nanoseconds."),
+		metric.WithUnit("ns"),
 	); err != nil {
 		return err
 	}
@@ -198,7 +199,7 @@ func recordStats(
 			}
 
 			o.ObserveInt64(acquireCount, dbStats.AcquireCount(), observeOptions...)
-			o.ObserveFloat64(acquireDuration, float64(dbStats.AcquireDuration())/1e6, observeOptions...)
+			o.ObserveInt64(acquireDuration, dbStats.AcquireDuration().Nanoseconds(), observeOptions...)
 			o.ObserveInt64(acquiredConns, int64(dbStats.AcquiredConns()), observeOptions...)
 			o.ObserveInt64(cancelledAcquires, dbStats.CanceledAcquireCount(), observeOptions...)
 			o.ObserveInt64(constructingConns, int64(dbStats.ConstructingConns()), observeOptions...)
