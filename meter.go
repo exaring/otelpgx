@@ -96,7 +96,7 @@ func recordStats(
 		pgxPoolAcquireCount,
 		metric.WithDescription("Cumulative count of successful acquires from the pool."),
 	); err != nil {
-		return err
+		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolAcquireCount, err)
 	}
 
 	if acquireDuration, err = meter.Int64ObservableCounter(
@@ -104,21 +104,21 @@ func recordStats(
 		metric.WithDescription("Total duration of all successful acquires from the pool in nanoseconds."),
 		metric.WithUnit("ns"),
 	); err != nil {
-		return err
+		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolAcquireDuration, err)
 	}
 
 	if acquiredConns, err = meter.Int64ObservableUpDownCounter(
 		pgxPoolAcquiredConnections,
 		metric.WithDescription("Number of currently acquired connections in the pool."),
 	); err != nil {
-		return err
+		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolAcquiredConnections, err)
 	}
 
 	if cancelledAcquires, err = meter.Int64ObservableCounter(
 		pgxPoolCancelledAcquires,
 		metric.WithDescription("Cumulative count of acquires from the pool that were canceled by a context."),
 	); err != nil {
-		return err
+		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolCancelledAcquires, err)
 	}
 
 	if constructingConns, err = meter.Int64ObservableUpDownCounter(
@@ -126,56 +126,56 @@ func recordStats(
 		metric.WithUnit("ms"),
 		metric.WithDescription("Number of connections with construction in progress in the pool."),
 	); err != nil {
-		return err
+		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolConstructingConnections, err)
 	}
 
 	if emptyAcquires, err = meter.Int64ObservableCounter(
 		pgxPoolEmptyAcquire,
 		metric.WithDescription("Cumulative count of successful acquires from the pool that waited for a resource to be released or constructed because the pool was empty."),
 	); err != nil {
-		return err
+		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolEmptyAcquire, err)
 	}
 
 	if idleConns, err = meter.Int64ObservableUpDownCounter(
 		pgxPoolIdleConnections,
 		metric.WithDescription("Number of currently idle connections in the pool."),
 	); err != nil {
-		return err
+		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolIdleConnections, err)
 	}
 
 	if maxConns, err = meter.Int64ObservableGauge(
 		pgxPoolMaxConnections,
 		metric.WithDescription("Maximum size of the pool."),
 	); err != nil {
-		return err
+		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolMaxConnections, err)
 	}
 
 	if maxIdleDestroyCount, err = meter.Int64ObservableCounter(
 		pgxPoolMaxIdleDestroyCount,
 		metric.WithDescription("Cumulative count of connections destroyed because they exceeded MaxConnectionsIdleTime."),
 	); err != nil {
-		return err
+		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolMaxIdleDestroyCount, err)
 	}
 
 	if maxLifetimeDestroyCount, err = meter.Int64ObservableCounter(
 		pgxPoolMaxLifetimeDestroyCount,
 		metric.WithDescription("Cumulative count of connections destroyed because they exceeded MaxConnectionsLifetime."),
 	); err != nil {
-		return err
+		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolMaxLifetimeDestroyCount, err)
 	}
 
 	if newConnsCount, err = meter.Int64ObservableCounter(
 		pgxPoolNewConnectionsCount,
 		metric.WithDescription("Cumulative count of new connections opened."),
 	); err != nil {
-		return err
+		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolNewConnectionsCount, err)
 	}
 
 	if totalConns, err = meter.Int64ObservableUpDownCounter(
 		pgxPoolTotalConnections,
 		metric.WithDescription("Total number of resources currently in the pool. The value is the sum of ConstructingConnections, AcquiredConnections, and IdleConnections."),
 	); err != nil {
-		return err
+		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolTotalConnections, err)
 	}
 
 	attrs = append(attrs, []attribute.KeyValue{
