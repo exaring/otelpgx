@@ -33,7 +33,8 @@ var (
 	pgxPoolTotalConnections        = "pgxpool.total_connections"
 )
 
-// RecordStats records database statistics for provided pgxpool.Pool at the provided interval.
+// RecordStats records database statistics for provided pgxpool.Pool at a default 1 second interval
+// unless otherwise specified by the WithMinimumReadDBStatsInterval StatsOption.
 func RecordStats(db *pgxpool.Pool, opts ...StatsOption) error {
 	o := statsOptions{
 		meterProvider:              otel.GetMeterProvider(),
