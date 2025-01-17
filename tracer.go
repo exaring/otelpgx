@@ -151,7 +151,7 @@ func (t *Tracer) createMetrics() {
 // recordSpanError handles all error handling to be applied on the provided span.
 // The provided error must be non-nil and not a sql.ErrNoRows error.
 // Otherwise, recordSpanError will be a no-op.
-func (t *Tracer) recordSpanError(span trace.Span, err error) {
+func recordSpanError(span trace.Span, err error) {
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
@@ -263,7 +263,7 @@ func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 // TraceQueryEnd is called at the end of Query, QueryRow, and Exec calls.
 func (t *Tracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
 	span := trace.SpanFromContext(ctx)
-	t.recordSpanError(span, data.Err)
+	recordSpanError(span, data.Err)
 	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationQuery)
 
 	if data.Err == nil {
@@ -303,7 +303,7 @@ func (t *Tracer) TraceCopyFromStart(ctx context.Context, conn *pgx.Conn, data pg
 // TraceCopyFromEnd is called at the end of CopyFrom calls.
 func (t *Tracer) TraceCopyFromEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceCopyFromEndData) {
 	span := trace.SpanFromContext(ctx)
-	t.recordSpanError(span, data.Err)
+	recordSpanError(span, data.Err)
 	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationCopy)
 
 	if data.Err == nil {
@@ -387,7 +387,7 @@ func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.T
 	}
 
 	_, span := t.tracer.Start(ctx, spanName, opts...)
-	t.recordSpanError(span, data.Err)
+	recordSpanError(span, data.Err)
 
 	span.End()
 }
@@ -395,7 +395,7 @@ func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.T
 // TraceBatchEnd is called at the end of SendBatch calls.
 func (t *Tracer) TraceBatchEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceBatchEndData) {
 	span := trace.SpanFromContext(ctx)
-	t.recordSpanError(span, data.Err)
+	recordSpanError(span, data.Err)
 	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationBatch)
 
 	span.End()
@@ -430,7 +430,7 @@ func (t *Tracer) TraceConnectStart(ctx context.Context, data pgx.TraceConnectSta
 // TraceConnectEnd is called at the end of Connect and ConnectConfig calls.
 func (t *Tracer) TraceConnectEnd(ctx context.Context, data pgx.TraceConnectEndData) {
 	span := trace.SpanFromContext(ctx)
-	t.recordSpanError(span, data.Err)
+	recordSpanError(span, data.Err)
 	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationConnect)
 
 	span.End()
@@ -483,7 +483,7 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 // TracePrepareEnd is called at the end of Prepare calls.
 func (t *Tracer) TracePrepareEnd(ctx context.Context, _ *pgx.Conn, data pgx.TracePrepareEndData) {
 	span := trace.SpanFromContext(ctx)
-	t.recordSpanError(span, data.Err)
+	recordSpanError(span, data.Err)
 	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationPrepare)
 
 	span.End()
@@ -517,7 +517,7 @@ func (t *Tracer) TraceAcquireStart(ctx context.Context, pool *pgxpool.Pool, data
 // TraceAcquireEnd is called when a connection has been acquired.
 func (t *Tracer) TraceAcquireEnd(ctx context.Context, _ *pgxpool.Pool, data pgxpool.TraceAcquireEndData) {
 	span := trace.SpanFromContext(ctx)
-	t.recordSpanError(span, data.Err)
+	recordSpanError(span, data.Err)
 	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationAcquire)
 
 	span.End()
