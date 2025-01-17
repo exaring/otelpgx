@@ -75,12 +75,7 @@ func recordStats(
 		newConnsCount           metric.Int64ObservableCounter
 		totalConns              metric.Int64ObservableUpDownCounter
 
-		observeOptions             []metric.ObserveOption
-		serverAddress              = semconv.ServerAddress(db.Config().ConnConfig.Host)
-		serverPort                 = semconv.ServerPort(int(db.Config().ConnConfig.Port))
-		dbNamespace                = semconv.DBNamespace(db.Config().ConnConfig.Database)
-		poolName                   = fmt.Sprintf("%s:%d/%s", serverAddress.Value.AsString(), serverPort.Value.AsInt64(), dbNamespace.Value.AsString())
-		dbClientConnectionPoolName = semconv.DBClientConnectionPoolName(poolName)
+		observeOptions []metric.ObserveOption
 
 		dbStats     *pgxpool.Stat
 		lastDBStats time.Time
@@ -88,6 +83,12 @@ func recordStats(
 		// lock prevents a race between batch observer and instrument registration.
 		lock sync.Mutex
 	)
+
+	serverAddress := semconv.ServerAddress(db.Config().ConnConfig.Host)
+	serverPort := semconv.ServerPort(int(db.Config().ConnConfig.Port))
+	dbNamespace := semconv.DBNamespace(db.Config().ConnConfig.Database)
+	poolName := fmt.Sprintf("%s:%d/%s", serverAddress.Value.AsString(), serverPort.Value.AsInt64(), dbNamespace.Value.AsString())
+	dbClientConnectionPoolName := semconv.DBClientConnectionPoolName(poolName)
 
 	lock.Lock()
 	defer lock.Unlock()
