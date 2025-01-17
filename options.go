@@ -39,6 +39,14 @@ func WithMeterProvider(provider metric.MeterProvider) Option {
 	})
 }
 
+// Deprecated: Use WithTracerAttributes.
+//
+// WithAttributes specifies additional attributes to be added to spans.
+// This is exactly equivalent to using WithTracerAttributes.
+func WithAttributes(attrs ...attribute.KeyValue) Option {
+	return WithTracerAttributes(attrs...)
+}
+
 // WithTracerAttributes specifies additional attributes to be added to spans.
 func WithTracerAttributes(attrs ...attribute.KeyValue) Option {
 	return optionFunc(func(cfg *tracerConfig) {
