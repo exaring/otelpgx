@@ -109,7 +109,7 @@ func WithIncludeQueryParameters() Option {
 	})
 }
 
-// StatsOption allows for managing otelsql configuration using functional options.
+// StatsOption allows for managing RecordStats configuration using functional options.
 type StatsOption interface {
 	applyStatsOptions(o *statsOptions)
 }
