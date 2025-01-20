@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"runtime/debug"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -14,14 +15,25 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
+	"go.opentelemetry.io/otel/metric"
+	semconv "go.opentelemetry.io/otel/semconv/v1.27.0"
 	"go.opentelemetry.io/otel/trace"
 )
 
 const (
-	tracerName = "github.com/exaring/otelpgx"
-
+	tracerName          = "github.com/exaring/otelpgx"
+	meterName           = "github.com/exaring/otelpgx"
+	startTimeCtxKey     = "otelpgxStartTime"
 	sqlOperationUnknown = "UNKNOWN"
+)
+
+const (
+	pgxOperationQuery   = "query"
+	pgxOperationCopy    = "copy"
+	pgxOperationBatch   = "batch"
+	pgxOperationConnect = "connect"
+	pgxOperationPrepare = "prepare"
+	pgxOperationAcquire = "acquire"
 )
 
 const (
@@ -29,20 +41,30 @@ const (
 	RowsAffectedKey = attribute.Key("pgx.rows_affected")
 	// QueryParametersKey represents the query parameters.
 	QueryParametersKey = attribute.Key("pgx.query.parameters")
-	// BatchSizeKey represents the batch size.
-	BatchSizeKey = attribute.Key("pgx.batch.size")
 	// PrepareStmtNameKey represents the prepared statement name.
 	PrepareStmtNameKey = attribute.Key("pgx.prepare_stmt.name")
 	// SQLStateKey represents PostgreSQL error code,
 	// see https://www.postgresql.org/docs/current/errcodes-appendix.html.
 	SQLStateKey = attribute.Key("pgx.sql_state")
+	// PGXOperationTypeKey represents the pgx tracer operation type
+	PGXOperationTypeKey = attribute.Key("pgx.operation.type")
+	// DBClientOperationErrorsKey represents the count of operation errors
+	DBClientOperationErrorsKey = attribute.Key("db.client.operation.errors")
 )
 
+var _ pgxpool.AcquireTracer = (*Tracer)(nil)
+
 // Tracer is a wrapper around the pgx tracer interfaces which instrument
-// queries.
+// queries with both tracing and metrics.
 type Tracer struct {
-	tracer              trace.Tracer
-	attrs               []attribute.KeyValue
+	tracer      trace.Tracer
+	meter       metric.Meter
+	tracerAttrs []attribute.KeyValue
+	meterAttrs  []attribute.KeyValue
+
+	operationDuration metric.Int64Histogram
+	operationErrors   metric.Int64Counter
+
 	trimQuerySpanName   bool
 	spanNameFunc        SpanNameFunc
 	prefixQuerySpanName bool
@@ -51,8 +73,12 @@ type Tracer struct {
 }
 
 type tracerConfig struct {
-	tp                  trace.TracerProvider
-	attrs               []attribute.KeyValue
+	tracerProvider trace.TracerProvider
+	meterProvider  metric.MeterProvider
+
+	tracerAttrs []attribute.KeyValue
+	meterAttrs  []attribute.KeyValue
+
 	trimQuerySpanName   bool
 	spanNameFunc        SpanNameFunc
 	prefixQuerySpanName bool
@@ -60,13 +86,15 @@ type tracerConfig struct {
 	includeParams       bool
 }
 
-var _ pgxpool.AcquireTracer = (*Tracer)(nil)
-
 // NewTracer returns a new Tracer.
 func NewTracer(opts ...Option) *Tracer {
 	cfg := &tracerConfig{
-		tp: otel.GetTracerProvider(),
-		attrs: []attribute.KeyValue{
+		tracerProvider: otel.GetTracerProvider(),
+		meterProvider:  otel.GetMeterProvider(),
+		tracerAttrs: []attribute.KeyValue{
+			semconv.DBSystemPostgreSQL,
+		},
+		meterAttrs: []attribute.KeyValue{
 			semconv.DBSystemPostgreSQL,
 		},
 		trimQuerySpanName:   false,
@@ -80,18 +108,50 @@ func NewTracer(opts ...Option) *Tracer {
 		opt.apply(cfg)
 	}
 
-	return &Tracer{
-		tracer:              cfg.tp.Tracer(tracerName, trace.WithInstrumentationVersion(findOwnImportedVersion())),
-		attrs:               cfg.attrs,
+	tracer := &Tracer{
+		tracer:              cfg.tracerProvider.Tracer(tracerName, trace.WithInstrumentationVersion(findOwnImportedVersion())),
+		meter:               cfg.meterProvider.Meter(meterName, metric.WithInstrumentationVersion(findOwnImportedVersion())),
+		tracerAttrs:         cfg.tracerAttrs,
+		meterAttrs:          cfg.meterAttrs,
 		trimQuerySpanName:   cfg.trimQuerySpanName,
 		spanNameFunc:        cfg.spanNameFunc,
 		prefixQuerySpanName: cfg.prefixQuerySpanName,
 		logSQLStatement:     cfg.logSQLStatement,
 		includeParams:       cfg.includeParams,
 	}
+
+	tracer.createMetrics()
+
+	return tracer
 }
 
-func recordError(span trace.Span, err error) {
+// createMetrics initializes all synchronous metrics tracked by Tracer.
+// Any errors encountered upon metric creation will be sent to the globally assigned OpenTelemetry ErrorHandler.
+func (t *Tracer) createMetrics() {
+	var err error
+
+	t.operationDuration, err = t.meter.Int64Histogram(
+		semconv.DBClientOperationDurationName,
+		metric.WithDescription(semconv.DBClientOperationDurationDescription),
+		metric.WithUnit("ms"),
+	)
+	if err != nil {
+		otel.Handle(err)
+	}
+
+	t.operationErrors, err = t.meter.Int64Counter(
+		string(DBClientOperationErrorsKey),
+		metric.WithDescription("The count of database client operation errors"),
+	)
+	if err != nil {
+		otel.Handle(err)
+	}
+}
+
+// recordSpanError handles all error handling to be applied on the provided span.
+// The provided error must be non-nil and not a sql.ErrNoRows error.
+// Otherwise, recordSpanError will be a no-op.
+func recordSpanError(span trace.Span, err error) {
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
@@ -100,6 +160,23 @@ func recordError(span trace.Span, err error) {
 		if errors.As(err, &pgErr) {
 			span.SetAttributes(SQLStateKey.String(pgErr.Code))
 		}
+	}
+}
+
+// incrementOperationErrorCount will increment the operation error count metric for any provided error
+// that is non-nil and not sql.ErrNoRows. Otherwise, incrementOperationErrorCount becomes a no-op.
+func (t *Tracer) incrementOperationErrorCount(ctx context.Context, err error, pgxOperation string) {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		t.operationErrors.Add(ctx, 1, metric.WithAttributes(append(t.meterAttrs, PGXOperationTypeKey.String(pgxOperation))...))
+	}
+}
+
+// recordOperationDuration will compute and record the time since the start of an operation.
+func (t *Tracer) recordOperationDuration(ctx context.Context, pgxOperation string) {
+	if startTime, ok := ctx.Value(startTimeCtxKey).(time.Time); ok {
+		t.operationDuration.Record(ctx, time.Since(startTime).Milliseconds(), metric.WithAttributes(
+			append(t.meterAttrs, PGXOperationTypeKey.String(pgxOperation))...,
+		))
 	}
 }
 
@@ -129,9 +206,11 @@ func connectionAttributesFromConfig(config *pgx.ConnConfig) []trace.SpanStartOpt
 	if config != nil {
 		return []trace.SpanStartOption{
 			trace.WithAttributes(
-				semconv.NetPeerName(config.Host),
-				semconv.NetPeerPort(int(config.Port)),
-				semconv.DBUser(config.User),
+				semconv.DBSystemPostgreSQL,
+				semconv.ServerAddress(config.Host),
+				semconv.ServerPort(int(config.Port)),
+				semconv.UserName(config.User),
+				semconv.DBNamespace(config.Database),
 			),
 		}
 	}
@@ -141,13 +220,15 @@ func connectionAttributesFromConfig(config *pgx.ConnConfig) []trace.SpanStartOpt
 // TraceQueryStart is called at the beginning of Query, QueryRow, and Exec calls.
 // The returned context is used for the rest of the call and will be passed to TraceQueryEnd.
 func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	ctx = context.WithValue(ctx, startTimeCtxKey, time.Now())
+
 	if !trace.SpanFromContext(ctx).IsRecording() {
 		return ctx
 	}
 
 	opts := []trace.SpanStartOption{
 		trace.WithSpanKind(trace.SpanKindClient),
-		trace.WithAttributes(t.attrs...),
+		trace.WithAttributes(t.tracerAttrs...),
 	}
 
 	if conn != nil {
@@ -155,7 +236,11 @@ func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 	}
 
 	if t.logSQLStatement {
-		opts = append(opts, trace.WithAttributes(semconv.DBStatement(data.SQL)))
+		opts = append(opts, trace.WithAttributes(
+			semconv.DBQueryText(data.SQL),
+			semconv.DBOperationName(t.sqlOperationName(data.SQL)),
+		))
+
 		if t.includeParams {
 			opts = append(opts, trace.WithAttributes(makeParamsAttribute(data.Args)))
 		}
@@ -165,6 +250,7 @@ func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 	if t.trimQuerySpanName {
 		spanName = t.sqlOperationName(data.SQL)
 	}
+
 	if t.prefixQuerySpanName {
 		spanName = "query " + spanName
 	}
@@ -177,27 +263,32 @@ func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 // TraceQueryEnd is called at the end of Query, QueryRow, and Exec calls.
 func (t *Tracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
 	span := trace.SpanFromContext(ctx)
-	recordError(span, data.Err)
+	recordSpanError(span, data.Err)
+	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationQuery)
 
 	if data.Err == nil {
 		span.SetAttributes(RowsAffectedKey.Int64(data.CommandTag.RowsAffected()))
 	}
 
 	span.End()
+
+	t.recordOperationDuration(ctx, pgxOperationQuery)
 }
 
 // TraceCopyFromStart is called at the beginning of CopyFrom calls. The
 // returned context is used for the rest of the call and will be passed to
 // TraceCopyFromEnd.
 func (t *Tracer) TraceCopyFromStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceCopyFromStartData) context.Context {
+	ctx = context.WithValue(ctx, startTimeCtxKey, time.Now())
+
 	if !trace.SpanFromContext(ctx).IsRecording() {
 		return ctx
 	}
 
 	opts := []trace.SpanStartOption{
 		trace.WithSpanKind(trace.SpanKindClient),
-		trace.WithAttributes(t.attrs...),
-		trace.WithAttributes(semconv.DBSQLTable(data.TableName.Sanitize())),
+		trace.WithAttributes(t.tracerAttrs...),
+		trace.WithAttributes(semconv.DBCollectionName(data.TableName.Sanitize())),
 	}
 
 	if conn != nil {
@@ -212,19 +303,24 @@ func (t *Tracer) TraceCopyFromStart(ctx context.Context, conn *pgx.Conn, data pg
 // TraceCopyFromEnd is called at the end of CopyFrom calls.
 func (t *Tracer) TraceCopyFromEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceCopyFromEndData) {
 	span := trace.SpanFromContext(ctx)
-	recordError(span, data.Err)
+	recordSpanError(span, data.Err)
+	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationCopy)
 
 	if data.Err == nil {
 		span.SetAttributes(RowsAffectedKey.Int64(data.CommandTag.RowsAffected()))
 	}
 
 	span.End()
+
+	t.recordOperationDuration(ctx, pgxOperationCopy)
 }
 
 // TraceBatchStart is called at the beginning of SendBatch calls. The returned
 // context is used for the rest of the call and will be passed to
 // TraceBatchQuery and TraceBatchEnd.
 func (t *Tracer) TraceBatchStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceBatchStartData) context.Context {
+	ctx = context.WithValue(ctx, startTimeCtxKey, time.Now())
+
 	if !trace.SpanFromContext(ctx).IsRecording() {
 		return ctx
 	}
@@ -236,8 +332,8 @@ func (t *Tracer) TraceBatchStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 
 	opts := []trace.SpanStartOption{
 		trace.WithSpanKind(trace.SpanKindClient),
-		trace.WithAttributes(t.attrs...),
-		trace.WithAttributes(BatchSizeKey.Int(size)),
+		trace.WithAttributes(t.tracerAttrs...),
+		trace.WithAttributes(semconv.DBOperationBatchSize(size)),
 	}
 
 	if conn != nil {
@@ -251,13 +347,15 @@ func (t *Tracer) TraceBatchStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 
 // TraceBatchQuery is called at the after each query in a batch.
 func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.TraceBatchQueryData) {
+	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationBatch)
+
 	if !trace.SpanFromContext(ctx).IsRecording() {
 		return
 	}
 
 	opts := []trace.SpanStartOption{
 		trace.WithSpanKind(trace.SpanKindClient),
-		trace.WithAttributes(t.attrs...),
+		trace.WithAttributes(t.tracerAttrs...),
 	}
 
 	if conn != nil {
@@ -265,11 +363,14 @@ func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.T
 	}
 
 	if t.logSQLStatement {
-		opts = append(opts, trace.WithAttributes(semconv.DBStatement(data.SQL)))
+		opts = append(opts, trace.WithAttributes(
+			semconv.DBQueryText(data.SQL),
+			semconv.DBOperationName(t.sqlOperationName(data.SQL)),
+		))
+
 		if t.includeParams {
 			opts = append(opts, trace.WithAttributes(makeParamsAttribute(data.Args)))
 		}
-
 	}
 
 	var spanName string
@@ -286,7 +387,7 @@ func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.T
 	}
 
 	_, span := t.tracer.Start(ctx, spanName, opts...)
-	recordError(span, data.Err)
+	recordSpanError(span, data.Err)
 
 	span.End()
 }
@@ -294,22 +395,27 @@ func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.T
 // TraceBatchEnd is called at the end of SendBatch calls.
 func (t *Tracer) TraceBatchEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceBatchEndData) {
 	span := trace.SpanFromContext(ctx)
-	recordError(span, data.Err)
+	recordSpanError(span, data.Err)
+	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationBatch)
 
 	span.End()
+
+	t.recordOperationDuration(ctx, pgxOperationBatch)
 }
 
 // TraceConnectStart is called at the beginning of Connect and ConnectConfig
 // calls. The returned context is used for the rest of the call and will be
 // passed to TraceConnectEnd.
 func (t *Tracer) TraceConnectStart(ctx context.Context, data pgx.TraceConnectStartData) context.Context {
+	ctx = context.WithValue(ctx, startTimeCtxKey, time.Now())
+
 	if !trace.SpanFromContext(ctx).IsRecording() {
 		return ctx
 	}
 
 	opts := []trace.SpanStartOption{
 		trace.WithSpanKind(trace.SpanKindClient),
-		trace.WithAttributes(t.attrs...),
+		trace.WithAttributes(t.tracerAttrs...),
 	}
 
 	if data.ConnConfig != nil {
@@ -324,22 +430,27 @@ func (t *Tracer) TraceConnectStart(ctx context.Context, data pgx.TraceConnectSta
 // TraceConnectEnd is called at the end of Connect and ConnectConfig calls.
 func (t *Tracer) TraceConnectEnd(ctx context.Context, data pgx.TraceConnectEndData) {
 	span := trace.SpanFromContext(ctx)
-	recordError(span, data.Err)
+	recordSpanError(span, data.Err)
+	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationConnect)
 
 	span.End()
+
+	t.recordOperationDuration(ctx, pgxOperationConnect)
 }
 
 // TracePrepareStart is called at the beginning of Prepare calls. The returned
 // context is used for the rest of the call and will be passed to
 // TracePrepareEnd.
 func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx.TracePrepareStartData) context.Context {
+	ctx = context.WithValue(ctx, startTimeCtxKey, time.Now())
+
 	if !trace.SpanFromContext(ctx).IsRecording() {
 		return ctx
 	}
 
 	opts := []trace.SpanStartOption{
 		trace.WithSpanKind(trace.SpanKindClient),
-		trace.WithAttributes(t.attrs...),
+		trace.WithAttributes(t.tracerAttrs...),
 	}
 
 	if data.Name != "" {
@@ -350,8 +461,10 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 		opts = append(opts, connectionAttributesFromConfig(conn.Config())...)
 	}
 
+	opts = append(opts, trace.WithAttributes(semconv.DBOperationName(t.sqlOperationName(data.SQL))))
+
 	if t.logSQLStatement {
-		opts = append(opts, trace.WithAttributes(semconv.DBStatement(data.SQL)))
+		opts = append(opts, trace.WithAttributes(semconv.DBQueryText(data.SQL)))
 	}
 
 	spanName := data.SQL
@@ -370,21 +483,26 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 // TracePrepareEnd is called at the end of Prepare calls.
 func (t *Tracer) TracePrepareEnd(ctx context.Context, _ *pgx.Conn, data pgx.TracePrepareEndData) {
 	span := trace.SpanFromContext(ctx)
-	recordError(span, data.Err)
+	recordSpanError(span, data.Err)
+	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationPrepare)
 
 	span.End()
+
+	t.recordOperationDuration(ctx, pgxOperationPrepare)
 }
 
 // TraceAcquireStart is called at the beginning of Acquire.
 // The returned context is used for the rest of the call and will be passed to the TraceAcquireEnd.
 func (t *Tracer) TraceAcquireStart(ctx context.Context, pool *pgxpool.Pool, data pgxpool.TraceAcquireStartData) context.Context {
+	ctx = context.WithValue(ctx, startTimeCtxKey, time.Now())
+
 	if !trace.SpanFromContext(ctx).IsRecording() {
 		return ctx
 	}
 
 	opts := []trace.SpanStartOption{
 		trace.WithSpanKind(trace.SpanKindClient),
-		trace.WithAttributes(t.attrs...),
+		trace.WithAttributes(t.tracerAttrs...),
 	}
 
 	if pool != nil && pool.Config() != nil && pool.Config().ConnConfig != nil {
@@ -399,9 +517,12 @@ func (t *Tracer) TraceAcquireStart(ctx context.Context, pool *pgxpool.Pool, data
 // TraceAcquireEnd is called when a connection has been acquired.
 func (t *Tracer) TraceAcquireEnd(ctx context.Context, _ *pgxpool.Pool, data pgxpool.TraceAcquireEndData) {
 	span := trace.SpanFromContext(ctx)
-	recordError(span, data.Err)
+	recordSpanError(span, data.Err)
+	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationAcquire)
 
 	span.End()
+
+	t.recordOperationDuration(ctx, pgxOperationAcquire)
 }
 
 func makeParamsAttribute(args []any) attribute.KeyValue {
@@ -409,6 +530,7 @@ func makeParamsAttribute(args []any) attribute.KeyValue {
 	for i := range args {
 		ss[i] = fmt.Sprintf("%+v", args[i])
 	}
+
 	return QueryParametersKey.StringSlice(ss)
 }
 
