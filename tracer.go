@@ -65,11 +65,12 @@ type Tracer struct {
 	operationDuration metric.Int64Histogram
 	operationErrors   metric.Int64Counter
 
-	trimQuerySpanName   bool
-	spanNameFunc        SpanNameFunc
-	prefixQuerySpanName bool
-	logSQLStatement     bool
-	includeParams       bool
+	trimQuerySpanName    bool
+	spanNameFunc         SpanNameFunc
+	prefixQuerySpanName  bool
+	logSQLStatement      bool
+	logConnectionDetails bool
+	includeParams        bool
 }
 
 type tracerConfig struct {
@@ -79,11 +80,12 @@ type tracerConfig struct {
 	tracerAttrs []attribute.KeyValue
 	meterAttrs  []attribute.KeyValue
 
-	trimQuerySpanName   bool
-	spanNameFunc        SpanNameFunc
-	prefixQuerySpanName bool
-	logSQLStatement     bool
-	includeParams       bool
+	trimQuerySpanName    bool
+	spanNameFunc         SpanNameFunc
+	prefixQuerySpanName  bool
+	logSQLStatement      bool
+	logConnectionDetails bool
+	includeParams        bool
 }
 
 // NewTracer returns a new Tracer.
@@ -97,11 +99,12 @@ func NewTracer(opts ...Option) *Tracer {
 		meterAttrs: []attribute.KeyValue{
 			semconv.DBSystemPostgreSQL,
 		},
-		trimQuerySpanName:   false,
-		spanNameFunc:        nil,
-		prefixQuerySpanName: true,
-		logSQLStatement:     true,
-		includeParams:       false,
+		trimQuerySpanName:    false,
+		spanNameFunc:         nil,
+		prefixQuerySpanName:  true,
+		logSQLStatement:      true,
+		logConnectionDetails: true,
+		includeParams:        false,
 	}
 
 	for _, opt := range opts {
@@ -200,19 +203,17 @@ func (t *Tracer) sqlOperationName(stmt string) string {
 	return strings.ToUpper(parts[0])
 }
 
-// connectionAttributesFromConfig returns a slice of SpanStartOptions that contain
+// connectionAttributesFromConfig returns a SpanStartOption that contains
 // attributes from the given connection config.
-func connectionAttributesFromConfig(config *pgx.ConnConfig) []trace.SpanStartOption {
+func connectionAttributesFromConfig(config *pgx.ConnConfig) trace.SpanStartOption {
 	if config != nil {
-		return []trace.SpanStartOption{
-			trace.WithAttributes(
-				semconv.DBSystemPostgreSQL,
-				semconv.ServerAddress(config.Host),
-				semconv.ServerPort(int(config.Port)),
-				semconv.UserName(config.User),
-				semconv.DBNamespace(config.Database),
-			),
-		}
+		return trace.WithAttributes(
+			semconv.DBSystemPostgreSQL,
+			semconv.ServerAddress(config.Host),
+			semconv.ServerPort(int(config.Port)),
+			semconv.UserName(config.User),
+			semconv.DBNamespace(config.Database),
+		)
 	}
 	return nil
 }
@@ -231,8 +232,8 @@ func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 		trace.WithAttributes(t.tracerAttrs...),
 	}
 
-	if conn != nil {
-		opts = append(opts, connectionAttributesFromConfig(conn.Config())...)
+	if t.logConnectionDetails && conn != nil {
+		opts = append(opts, connectionAttributesFromConfig(conn.Config()))
 	}
 
 	if t.logSQLStatement {
@@ -291,8 +292,8 @@ func (t *Tracer) TraceCopyFromStart(ctx context.Context, conn *pgx.Conn, data pg
 		trace.WithAttributes(semconv.DBCollectionName(data.TableName.Sanitize())),
 	}
 
-	if conn != nil {
-		opts = append(opts, connectionAttributesFromConfig(conn.Config())...)
+	if t.logConnectionDetails && conn != nil {
+		opts = append(opts, connectionAttributesFromConfig(conn.Config()))
 	}
 
 	ctx, _ = t.tracer.Start(ctx, "copy_from "+data.TableName.Sanitize(), opts...)
@@ -336,8 +337,8 @@ func (t *Tracer) TraceBatchStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 		trace.WithAttributes(semconv.DBOperationBatchSize(size)),
 	}
 
-	if conn != nil {
-		opts = append(opts, connectionAttributesFromConfig(conn.Config())...)
+	if t.logConnectionDetails && conn != nil {
+		opts = append(opts, connectionAttributesFromConfig(conn.Config()))
 	}
 
 	ctx, _ = t.tracer.Start(ctx, "batch start", opts...)
@@ -358,8 +359,8 @@ func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.T
 		trace.WithAttributes(t.tracerAttrs...),
 	}
 
-	if conn != nil {
-		opts = append(opts, connectionAttributesFromConfig(conn.Config())...)
+	if t.logConnectionDetails && conn != nil {
+		opts = append(opts, connectionAttributesFromConfig(conn.Config()))
 	}
 
 	if t.logSQLStatement {
@@ -418,8 +419,8 @@ func (t *Tracer) TraceConnectStart(ctx context.Context, data pgx.TraceConnectSta
 		trace.WithAttributes(t.tracerAttrs...),
 	}
 
-	if data.ConnConfig != nil {
-		opts = append(opts, connectionAttributesFromConfig(data.ConnConfig)...)
+	if t.logConnectionDetails && data.ConnConfig != nil {
+		opts = append(opts, connectionAttributesFromConfig(data.ConnConfig))
 	}
 
 	ctx, _ = t.tracer.Start(ctx, "connect", opts...)
@@ -457,8 +458,8 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 		trace.WithAttributes(PrepareStmtNameKey.String(data.Name))
 	}
 
-	if conn != nil {
-		opts = append(opts, connectionAttributesFromConfig(conn.Config())...)
+	if t.logConnectionDetails && conn != nil {
+		opts = append(opts, connectionAttributesFromConfig(conn.Config()))
 	}
 
 	opts = append(opts, trace.WithAttributes(semconv.DBOperationName(t.sqlOperationName(data.SQL))))
@@ -505,8 +506,8 @@ func (t *Tracer) TraceAcquireStart(ctx context.Context, pool *pgxpool.Pool, data
 		trace.WithAttributes(t.tracerAttrs...),
 	}
 
-	if pool != nil && pool.Config() != nil && pool.Config().ConnConfig != nil {
-		opts = append(opts, connectionAttributesFromConfig(pool.Config().ConnConfig)...)
+	if t.logConnectionDetails && pool != nil && pool.Config() != nil && pool.Config().ConnConfig != nil {
+		opts = append(opts, connectionAttributesFromConfig(pool.Config().ConnConfig))
 	}
 
 	ctx, _ = t.tracer.Start(ctx, "pool.acquire", opts...)

@@ -93,6 +93,14 @@ func WithDisableQuerySpanNamePrefix() Option {
 	})
 }
 
+// WithDisableConnectionDetailsInAttributes will disable logging the connection details.
+// in the span's attributes.
+func WithDisableConnectionDetailsInAttributes() Option {
+	return optionFunc(func(cfg *tracerConfig) {
+		cfg.logConnectionDetails = false
+	})
+}
+
 // WithDisableSQLStatementInAttributes will disable logging the SQL statement in the span's
 // attributes.
 func WithDisableSQLStatementInAttributes() Option {
