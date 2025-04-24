@@ -8,6 +8,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -170,15 +171,17 @@ func recordSpanError(span trace.Span, err error) {
 // that is non-nil and not sql.ErrNoRows. Otherwise, incrementOperationErrorCount becomes a no-op.
 func (t *Tracer) incrementOperationErrorCount(ctx context.Context, err error, pgxOperation string) {
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		t.operationErrors.Add(ctx, 1, metric.WithAttributes(append(t.meterAttrs, PGXOperationTypeKey.String(pgxOperation))...))
+		t.operationErrors.Add(ctx, 1, metric.WithAttributeSet(
+			attribute.NewSet(append(t.meterAttrs, PGXOperationTypeKey.String(pgxOperation))...),
+		))
 	}
 }
 
 // recordOperationDuration will compute and record the time since the start of an operation.
 func (t *Tracer) recordOperationDuration(ctx context.Context, pgxOperation string) {
 	if startTime, ok := ctx.Value(startTimeCtxKey).(time.Time); ok {
-		t.operationDuration.Record(ctx, time.Since(startTime).Milliseconds(), metric.WithAttributes(
-			append(t.meterAttrs, PGXOperationTypeKey.String(pgxOperation))...,
+		t.operationDuration.Record(ctx, time.Since(startTime).Milliseconds(), metric.WithAttributeSet(
+			attribute.NewSet(append(t.meterAttrs, PGXOperationTypeKey.String(pgxOperation))...),
 		))
 	}
 }
@@ -193,14 +196,16 @@ func (t *Tracer) sqlOperationName(stmt string) string {
 		return t.spanNameFunc(stmt)
 	}
 
-	parts := strings.Fields(stmt)
-	if len(parts) == 0 {
+	// NOTE: Can convert to FieldsSeq in go 1.24+ which avoids allocations.
+	stmt = strings.TrimSpace(stmt)
+	spaceIdx := strings.IndexFunc(stmt, unicode.IsSpace)
+	if spaceIdx <= 0 {
 		// Fall back to a fixed value to prevent creating lots of tracing operations
 		// differing only by the amount of whitespace in them (in case we'd fall back
 		// to the full query or a cut-off version).
 		return sqlOperationUnknown
 	}
-	return strings.ToUpper(parts[0])
+	return strings.ToUpper(stmt[:spaceIdx])
 }
 
 // connectionAttributesFromConfig returns a SpanStartOption that contains
@@ -227,10 +232,11 @@ func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 		return ctx
 	}
 
-	opts := []trace.SpanStartOption{
+	opts := make([]trace.SpanStartOption, 0, 6)
+	opts = append(opts,
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(t.tracerAttrs...),
-	}
+	)
 
 	if t.logConnectionDetails && conn != nil {
 		opts = append(opts, connectionAttributesFromConfig(conn.Config()))
@@ -286,11 +292,12 @@ func (t *Tracer) TraceCopyFromStart(ctx context.Context, conn *pgx.Conn, data pg
 		return ctx
 	}
 
-	opts := []trace.SpanStartOption{
+	opts := make([]trace.SpanStartOption, 0, 4)
+	opts = append(opts,
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(t.tracerAttrs...),
 		trace.WithAttributes(semconv.DBCollectionName(data.TableName.Sanitize())),
-	}
+	)
 
 	if t.logConnectionDetails && conn != nil {
 		opts = append(opts, connectionAttributesFromConfig(conn.Config()))
@@ -331,11 +338,12 @@ func (t *Tracer) TraceBatchStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 		size = b.Len()
 	}
 
-	opts := []trace.SpanStartOption{
+	opts := make([]trace.SpanStartOption, 0, 4)
+	opts = append(opts,
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(t.tracerAttrs...),
 		trace.WithAttributes(semconv.DBOperationBatchSize(size)),
-	}
+	)
 
 	if t.logConnectionDetails && conn != nil {
 		opts = append(opts, connectionAttributesFromConfig(conn.Config()))
@@ -354,10 +362,11 @@ func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.T
 		return
 	}
 
-	opts := []trace.SpanStartOption{
+	opts := make([]trace.SpanStartOption, 0, 6)
+	opts = append(opts,
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(t.tracerAttrs...),
-	}
+	)
 
 	if t.logConnectionDetails && conn != nil {
 		opts = append(opts, connectionAttributesFromConfig(conn.Config()))
@@ -414,10 +423,11 @@ func (t *Tracer) TraceConnectStart(ctx context.Context, data pgx.TraceConnectSta
 		return ctx
 	}
 
-	opts := []trace.SpanStartOption{
+	opts := make([]trace.SpanStartOption, 0, 3)
+	opts = append(opts,
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(t.tracerAttrs...),
-	}
+	)
 
 	if t.logConnectionDetails && data.ConnConfig != nil {
 		opts = append(opts, connectionAttributesFromConfig(data.ConnConfig))
@@ -449,10 +459,11 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 		return ctx
 	}
 
-	opts := []trace.SpanStartOption{
+	opts := make([]trace.SpanStartOption, 0, 6)
+	opts = append(opts,
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(t.tracerAttrs...),
-	}
+	)
 
 	if data.Name != "" {
 		trace.WithAttributes(PrepareStmtNameKey.String(data.Name))
@@ -501,10 +512,11 @@ func (t *Tracer) TraceAcquireStart(ctx context.Context, pool *pgxpool.Pool, data
 		return ctx
 	}
 
-	opts := []trace.SpanStartOption{
+	opts := make([]trace.SpanStartOption, 0, 3)
+	opts = append(opts,
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(t.tracerAttrs...),
-	}
+	)
 
 	if t.logConnectionDetails && pool != nil && pool.Config() != nil && pool.Config().ConnConfig != nil {
 		opts = append(opts, connectionAttributesFromConfig(pool.Config().ConnConfig))
