@@ -186,7 +186,7 @@ func recordStats(
 	}...)
 
 	observeOptions = []metric.ObserveOption{
-		metric.WithAttributes(attrs...),
+		metric.WithAttributeSet(attribute.NewSet(attrs...)),
 	}
 
 	_, err = meter.RegisterCallback(
