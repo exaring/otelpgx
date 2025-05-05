@@ -35,7 +35,7 @@ var (
 
 // RecordStats records database statistics for provided pgxpool.Pool at a default 1 second interval
 // unless otherwise specified by the WithMinimumReadDBStatsInterval StatsOption.
-func RecordStats(db *pgxpool.Pool, opts ...StatsOption) error {
+func RecordStats(db PoolStats, opts ...StatsOption) error {
 	o := statsOptions{
 		meterProvider:              otel.GetMeterProvider(),
 		minimumReadDBStatsInterval: defaultMinimumReadDBStatsInterval,
@@ -53,9 +53,15 @@ func RecordStats(db *pgxpool.Pool, opts ...StatsOption) error {
 	return recordStats(meter, db, o.minimumReadDBStatsInterval, o.defaultAttributes...)
 }
 
+// PoolStats is an interface that provides access to the pgxpool.Pool's statistics.
+type PoolStats interface {
+	Stat() *pgxpool.Stat
+	Config() *pgxpool.Config
+}
+
 func recordStats(
 	meter metric.Meter,
-	db *pgxpool.Pool,
+	db PoolStats,
 	minimumReadDBStatsInterval time.Duration,
 	attrs ...attribute.KeyValue,
 ) error {
