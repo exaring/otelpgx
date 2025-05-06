@@ -31,6 +31,7 @@ var (
 	pgxPoolMaxLifetimeDestroyCount = "pgxpool.max_lifetime_destroys"
 	pgxPoolNewConnectionsCount     = "pgxpool.new_connections"
 	pgxPoolTotalConnections        = "pgxpool.total_connections"
+	pgxPoolEmptyAcquireWaitTime    = "pgxpool.empty_acquire_wait_time"
 )
 
 // RecordStats records database statistics for provided pgxpool.Pool at a default 1 second interval
@@ -81,6 +82,7 @@ func recordStats(
 		maxLifetimeDestroyCount metric.Int64ObservableCounter
 		newConnsCount           metric.Int64ObservableCounter
 		totalConns              metric.Int64ObservableUpDownCounter
+		emptyAcquireWaitTime    metric.Int64ObservableCounter
 
 		observeOptions []metric.ObserveOption
 
@@ -186,6 +188,14 @@ func recordStats(
 		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolTotalConnections, err)
 	}
 
+	if emptyAcquireWaitTime, err = meter.Int64ObservableCounter(
+		pgxPoolEmptyAcquireWaitTime,
+		metric.WithDescription("Total time waited for successful acquires from the pool for a resource to be released or constructed because the pool was empty."),
+		metric.WithUnit("ns"),
+	); err != nil {
+		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolEmptyAcquireWaitTime, err)
+	}
+
 	attrs = append(attrs, []attribute.KeyValue{
 		semconv.DBSystemPostgreSQL,
 		dbClientConnectionPoolName,
@@ -218,6 +228,7 @@ func recordStats(
 			o.ObserveInt64(maxLifetimeDestroyCount, dbStats.MaxLifetimeDestroyCount(), observeOptions...)
 			o.ObserveInt64(newConnsCount, dbStats.NewConnsCount(), observeOptions...)
 			o.ObserveInt64(totalConns, int64(dbStats.TotalConns()), observeOptions...)
+			o.ObserveInt64(emptyAcquireWaitTime, dbStats.EmptyAcquireWaitTime().Nanoseconds(), observeOptions...)
 
 			return nil
 		},
@@ -233,6 +244,7 @@ func recordStats(
 		maxLifetimeDestroyCount,
 		newConnsCount,
 		totalConns,
+		emptyAcquireWaitTime,
 	)
 
 	return err
