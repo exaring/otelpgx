@@ -21,10 +21,12 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+type contextKey int8
+
 const (
 	tracerName          = "github.com/exaring/otelpgx"
 	meterName           = "github.com/exaring/otelpgx"
-	startTimeCtxKey     = "otelpgxStartTime"
+	startTimeCtxKey     = contextKey(0)
 	sqlOperationUnknown = "UNKNOWN"
 )
 
