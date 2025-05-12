@@ -31,6 +31,12 @@ func TestTracer_sqlOperationName(t *testing.T) {
 			expName: "SELECT",
 		},
 		{
+			name:    "Single word statement",
+			query:   "BEGIN",
+			tracer:  NewTracer(),
+			expName: "BEGIN",
+		},
+		{
 			name:    "Whitespace-only query",
 			query:   " \n\t",
 			tracer:  NewTracer(),

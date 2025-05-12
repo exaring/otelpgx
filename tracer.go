@@ -198,14 +198,17 @@ func (t *Tracer) sqlOperationName(stmt string) string {
 
 	// NOTE: Can convert to FieldsSeq in go 1.24+ which avoids allocations.
 	stmt = strings.TrimSpace(stmt)
-	spaceIdx := strings.IndexFunc(stmt, unicode.IsSpace)
-	if spaceIdx <= 0 {
+	end := strings.IndexFunc(stmt, unicode.IsSpace)
+	if end < 0 && len(stmt) > 0 {
+		// No space found, use the whole statement.
+		end = len(stmt)
+	} else if end < 0 {
 		// Fall back to a fixed value to prevent creating lots of tracing operations
 		// differing only by the amount of whitespace in them (in case we'd fall back
 		// to the full query or a cut-off version).
 		return sqlOperationUnknown
 	}
-	return strings.ToUpper(stmt[:spaceIdx])
+	return strings.ToUpper(stmt[:end])
 }
 
 // connectionAttributesFromConfig returns a SpanStartOption that contains
