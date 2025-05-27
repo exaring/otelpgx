@@ -18,7 +18,7 @@ const (
 	defaultMinimumReadDBStatsInterval = time.Second
 )
 
-var (
+const (
 	pgxPoolAcquireCount            = "pgxpool.acquires"
 	pgxPoolAcquireDuration         = "pgxpool.acquire_duration"
 	pgxPoolAcquiredConnections     = "pgxpool.acquired_connections"
