@@ -58,10 +58,11 @@ var _ pgxpool.AcquireTracer = (*Tracer)(nil)
 // Tracer is a wrapper around the pgx tracer interfaces which instrument
 // queries with both tracing and metrics.
 type Tracer struct {
-	tracer      trace.Tracer
-	meter       metric.Meter
-	tracerAttrs []attribute.KeyValue
-	meterAttrs  []attribute.KeyValue
+	batchQueryTracer trace.Tracer
+	tracer           trace.Tracer
+	meter            metric.Meter
+	tracerAttrs      []attribute.KeyValue
+	meterAttrs       []attribute.KeyValue
 
 	operationDuration metric.Int64Histogram
 	operationErrors   metric.Int64Counter
@@ -75,8 +76,9 @@ type Tracer struct {
 }
 
 type tracerConfig struct {
-	tracerProvider trace.TracerProvider
-	meterProvider  metric.MeterProvider
+	batchQueryTracerProvider trace.TracerProvider
+	tracerProvider           trace.TracerProvider
+	meterProvider            metric.MeterProvider
 
 	tracerAttrs []attribute.KeyValue
 	meterAttrs  []attribute.KeyValue
@@ -92,8 +94,9 @@ type tracerConfig struct {
 // NewTracer returns a new Tracer.
 func NewTracer(opts ...Option) *Tracer {
 	cfg := &tracerConfig{
-		tracerProvider: otel.GetTracerProvider(),
-		meterProvider:  otel.GetMeterProvider(),
+		batchQueryTracerProvider: nil,
+		tracerProvider:           otel.GetTracerProvider(),
+		meterProvider:            otel.GetMeterProvider(),
 		tracerAttrs: []attribute.KeyValue{
 			semconv.DBSystemPostgreSQL,
 		},
@@ -112,7 +115,16 @@ func NewTracer(opts ...Option) *Tracer {
 		opt.apply(cfg)
 	}
 
+	// If a batchQueryTracerProvider was not optionally assigned,
+	// default to using the same TracerProvider as used for all other operations.
+	// This is guaranteed to be non-nil as this defaults to the global TracerProvider,
+	// unless otherwise optionally user-assigned as well.
+	if cfg.batchQueryTracerProvider == nil {
+		cfg.batchQueryTracerProvider = cfg.tracerProvider
+	}
+
 	tracer := &Tracer{
+		batchQueryTracer:    cfg.batchQueryTracerProvider.Tracer(tracerName, trace.WithInstrumentationVersion(findOwnImportedVersion())),
 		tracer:              cfg.tracerProvider.Tracer(tracerName, trace.WithInstrumentationVersion(findOwnImportedVersion())),
 		meter:               cfg.meterProvider.Meter(meterName, metric.WithInstrumentationVersion(findOwnImportedVersion())),
 		tracerAttrs:         cfg.tracerAttrs,
@@ -399,7 +411,7 @@ func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.T
 		}
 	}
 
-	_, span := t.tracer.Start(ctx, spanName, opts...)
+	_, span := t.batchQueryTracer.Start(ctx, spanName, opts...)
 	recordSpanError(span, data.Err)
 
 	span.End()
