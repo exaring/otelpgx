@@ -133,7 +133,6 @@ func recordStats(
 
 	if constructingConns, err = meter.Int64ObservableUpDownCounter(
 		pgxPoolConstructingConnections,
-		metric.WithUnit("ms"),
 		metric.WithDescription("Number of connections with construction in progress in the pool."),
 	); err != nil {
 		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolConstructingConnections, err)
