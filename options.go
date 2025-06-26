@@ -29,6 +29,26 @@ func WithTracerProvider(provider trace.TracerProvider) Option {
 	})
 }
 
+// WithBatchQueryTracerProvider specifies a tracer provider to use for creating a tracer
+// that is used specifically for spans within a batch's per-query operations.
+//
+// This is useful for those who may have lengthy batches and wish to either disable,
+// or by some means sample the spans created for each individual query within a batch operation.
+//
+// For instance, one could choose to sample 50% of the per-query spans created within a batch
+// by specifying the following tracer provider to WithBatchQueryTracerProvider:
+// trace.NewTracerProvider(trace.WithSampler(trace.ParentBased(trace.TraceIDRatioBased(0.5))))
+//
+// If WithBatchQueryTracerProvider is not specified, the same tracer provider as specified by WithTracerProvider is used.
+// If WithTracerProvider is not specified either, then the same default as WithTracerProvider is used -- the OTel SDK global provider.
+func WithBatchQueryTracerProvider(provider trace.TracerProvider) Option {
+	return optionFunc(func(cfg *tracerConfig) {
+		if provider != nil {
+			cfg.batchQueryTracerProvider = provider
+		}
+	})
+}
+
 // WithMeterProvider specifies a meter provider to use for creating a meter.
 // If none is specified, the global provider is used.
 func WithMeterProvider(provider metric.MeterProvider) Option {
