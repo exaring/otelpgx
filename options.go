@@ -159,3 +159,9 @@ func WithMinimumReadDBStatsInterval(interval time.Duration) StatsOption {
 		o.minimumReadDBStatsInterval = interval
 	})
 }
+
+func WithSkipBatchQueries() Option {
+	return optionFunc(func(cfg *tracerConfig) {
+		cfg.skipBatchQueries = true
+	})
+}
