@@ -59,6 +59,7 @@ var _ pgxpool.AcquireTracer = (*Tracer)(nil)
 
 // Tracer is a wrapper around the pgx tracer interfaces which instrument
 // queries with both tracing and metrics.
+// Use [NewTracer] to create a new instance.
 type Tracer struct {
 	tracer      trace.Tracer
 	meter       metric.Meter
@@ -103,7 +104,7 @@ func NewTracer(opts ...Option) *Tracer {
 			semconv.DBSystemPostgreSQL,
 		},
 		trimQuerySpanName:    false,
-		spanNameFunc:         nil,
+		spanNameFunc:         defaultSpanNameFunc,
 		prefixQuerySpanName:  true,
 		logSQLStatement:      true,
 		logConnectionDetails: true,
@@ -225,7 +226,7 @@ func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 	if t.logSQLStatement {
 		opts = append(opts, trace.WithAttributes(
 			semconv.DBQueryText(data.SQL),
-			semconv.DBOperationName(t.sqlOperationName(data.SQL)),
+			semconv.DBOperationName(t.spanNameFunc(data.SQL)),
 		))
 
 		if t.includeParams {
@@ -235,7 +236,7 @@ func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 
 	spanName := data.SQL
 	if t.trimQuerySpanName {
-		spanName = t.sqlOperationName(data.SQL)
+		spanName = t.spanNameFunc(data.SQL)
 	}
 
 	if t.prefixQuerySpanName {
@@ -355,7 +356,7 @@ func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.T
 	if t.logSQLStatement {
 		opts = append(opts, trace.WithAttributes(
 			semconv.DBQueryText(data.SQL),
-			semconv.DBOperationName(t.sqlOperationName(data.SQL)),
+			semconv.DBOperationName(t.spanNameFunc(data.SQL)),
 		))
 
 		if t.includeParams {
@@ -365,7 +366,7 @@ func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.T
 
 	var spanName string
 	if t.trimQuerySpanName {
-		spanName = t.sqlOperationName(data.SQL)
+		spanName = t.spanNameFunc(data.SQL)
 		if t.prefixQuerySpanName {
 			spanName = "query " + spanName
 		}
@@ -453,7 +454,7 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 		opts = append(opts, connectionAttributesFromConfig(conn.Config()))
 	}
 
-	opts = append(opts, trace.WithAttributes(semconv.DBOperationName(t.sqlOperationName(data.SQL))))
+	opts = append(opts, trace.WithAttributes(semconv.DBOperationName(t.spanNameFunc(data.SQL))))
 
 	if t.logSQLStatement {
 		opts = append(opts, trace.WithAttributes(semconv.DBQueryText(data.SQL)))
@@ -461,7 +462,7 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 
 	spanName := data.SQL
 	if t.trimQuerySpanName {
-		spanName = t.sqlOperationName(data.SQL)
+		spanName = t.spanNameFunc(data.SQL)
 	}
 	if t.prefixQuerySpanName {
 		spanName = "prepare " + spanName
