@@ -51,53 +51,53 @@ func TestTracer_sqlOperationName(t *testing.T) {
 		{
 			name:    "Functional span name (-- comment style)",
 			query:   "-- name: GetUsers :many\nSELECT * FROM users",
-			tracer:  NewTracer(WithSpanNameFunc(defaultSpanNameFunc)),
+			tracer:  NewTracer(WithSpanNameFunc(testSpanNameFunc)),
 			expName: "GetUsers :many",
 		},
 		{
 			name:    "Functional span name (/**/ comment style)",
 			query:   "/* name: GetBooks :many */\nSELECT * FROM books",
-			tracer:  NewTracer(WithSpanNameFunc(defaultSpanNameFunc)),
+			tracer:  NewTracer(WithSpanNameFunc(testSpanNameFunc)),
 			expName: "GetBooks :many",
 		},
 		{
 			name:    "Functional span name (# comment style)",
 			query:   "# name: GetRecords :many\nSELECT * FROM records",
-			tracer:  NewTracer(WithSpanNameFunc(defaultSpanNameFunc)),
+			tracer:  NewTracer(WithSpanNameFunc(testSpanNameFunc)),
 			expName: "GetRecords :many",
 		},
 		{
 			name:    "Functional span name (no annotation)",
 			query:   "--\nSELECT * FROM user",
-			tracer:  NewTracer(WithSpanNameFunc(defaultSpanNameFunc)),
+			tracer:  NewTracer(WithSpanNameFunc(testSpanNameFunc)),
 			expName: sqlOperationUnknown,
 		},
 		{
 			name:    "Custom SQL name query (normal comment)",
 			query:   "-- foo \nSELECT * FROM users",
-			tracer:  NewTracer(WithSpanNameFunc(defaultSpanNameFunc)),
+			tracer:  NewTracer(WithSpanNameFunc(testSpanNameFunc)),
 			expName: sqlOperationUnknown,
 		},
 		{
 			name:    "Custom SQL name query (invalid formatting)",
 			query:   "foo \nSELECT * FROM users",
-			tracer:  NewTracer(WithSpanNameFunc(defaultSpanNameFunc)),
+			tracer:  NewTracer(WithSpanNameFunc(testSpanNameFunc)),
 			expName: sqlOperationUnknown,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tr := tt.tracer
-			if got := tr.sqlOperationName(tt.query); got != tt.expName {
+			if got := tr.spanNameFunc(tt.query); got != tt.expName {
 				t.Errorf("Tracer.sqlOperationName() = %v, want %v", got, tt.expName)
 			}
 		})
 	}
 }
 
-// defaultSpanNameFunc is an utility function for testing that attempts to get
+// testSpanNameFunc is an utility function for testing that attempts to get
 // the first name of the query from a given SQL statement.
-var defaultSpanNameFunc SpanNameFunc = func(query string) string {
+var testSpanNameFunc SpanNameFunc = func(query string) string {
 	for _, line := range strings.Split(query, "\n") {
 		var prefix string
 		switch {
