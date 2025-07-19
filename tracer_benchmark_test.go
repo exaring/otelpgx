@@ -1,3 +1,6 @@
+//go:build go1.24
+// +build go1.24
+
 package otelpgx_test
 
 import (
@@ -41,8 +44,7 @@ func BenchmarkTracer(b *testing.B) {
 	var maxConns int32
 
 	b.ReportAllocs()
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		tx, err := pool.Begin(ctx)
 		if err != nil {
 			b.Fatal(err)
