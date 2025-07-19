@@ -20,9 +20,11 @@ import (
 )
 
 const (
-	tracerName          = "github.com/exaring/otelpgx"
-	meterName           = "github.com/exaring/otelpgx"
-	startTimeCtxKey     = "otelpgxStartTime"
+	tracerName = "github.com/exaring/otelpgx"
+	meterName  = "github.com/exaring/otelpgx"
+)
+
+const (
 	sqlOperationUnknown = "UNKNOWN"
 )
 
@@ -50,6 +52,8 @@ const (
 	// DBClientOperationErrorsKey represents the count of operation errors
 	DBClientOperationErrorsKey = attribute.Key("db.client.operation.errors")
 )
+
+type startTimeCtxKey struct{}
 
 var _ pgxpool.AcquireTracer = (*Tracer)(nil)
 
@@ -177,7 +181,7 @@ func (t *Tracer) incrementOperationErrorCount(ctx context.Context, err error, pg
 
 // recordOperationDuration will compute and record the time since the start of an operation.
 func (t *Tracer) recordOperationDuration(ctx context.Context, pgxOperation string) {
-	if startTime, ok := ctx.Value(startTimeCtxKey).(time.Time); ok {
+	if startTime, ok := ctx.Value(startTimeCtxKey{}).(time.Time); ok {
 		t.operationDuration.Record(ctx, time.Since(startTime).Milliseconds(), metric.WithAttributeSet(
 			attribute.NewSet(append(t.meterAttrs, PGXOperationTypeKey.String(pgxOperation))...),
 		))
@@ -202,7 +206,7 @@ func connectionAttributesFromConfig(config *pgx.ConnConfig) trace.SpanStartOptio
 // TraceQueryStart is called at the beginning of Query, QueryRow, and Exec calls.
 // The returned context is used for the rest of the call and will be passed to TraceQueryEnd.
 func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
-	ctx = context.WithValue(ctx, startTimeCtxKey, time.Now())
+	ctx = context.WithValue(ctx, startTimeCtxKey{}, time.Now())
 
 	if !trace.SpanFromContext(ctx).IsRecording() {
 		return ctx
@@ -262,7 +266,7 @@ func (t *Tracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQ
 // returned context is used for the rest of the call and will be passed to
 // TraceCopyFromEnd.
 func (t *Tracer) TraceCopyFromStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceCopyFromStartData) context.Context {
-	ctx = context.WithValue(ctx, startTimeCtxKey, time.Now())
+	ctx = context.WithValue(ctx, startTimeCtxKey{}, time.Now())
 
 	if !trace.SpanFromContext(ctx).IsRecording() {
 		return ctx
@@ -303,7 +307,7 @@ func (t *Tracer) TraceCopyFromEnd(ctx context.Context, _ *pgx.Conn, data pgx.Tra
 // context is used for the rest of the call and will be passed to
 // TraceBatchQuery and TraceBatchEnd.
 func (t *Tracer) TraceBatchStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceBatchStartData) context.Context {
-	ctx = context.WithValue(ctx, startTimeCtxKey, time.Now())
+	ctx = context.WithValue(ctx, startTimeCtxKey{}, time.Now())
 
 	if !trace.SpanFromContext(ctx).IsRecording() {
 		return ctx
@@ -393,7 +397,7 @@ func (t *Tracer) TraceBatchEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceB
 // calls. The returned context is used for the rest of the call and will be
 // passed to TraceConnectEnd.
 func (t *Tracer) TraceConnectStart(ctx context.Context, data pgx.TraceConnectStartData) context.Context {
-	ctx = context.WithValue(ctx, startTimeCtxKey, time.Now())
+	ctx = context.WithValue(ctx, startTimeCtxKey{}, time.Now())
 
 	if !trace.SpanFromContext(ctx).IsRecording() {
 		return ctx
@@ -429,7 +433,7 @@ func (t *Tracer) TraceConnectEnd(ctx context.Context, data pgx.TraceConnectEndDa
 // context is used for the rest of the call and will be passed to
 // TracePrepareEnd.
 func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx.TracePrepareStartData) context.Context {
-	ctx = context.WithValue(ctx, startTimeCtxKey, time.Now())
+	ctx = context.WithValue(ctx, startTimeCtxKey{}, time.Now())
 
 	if !trace.SpanFromContext(ctx).IsRecording() {
 		return ctx
@@ -482,7 +486,7 @@ func (t *Tracer) TracePrepareEnd(ctx context.Context, _ *pgx.Conn, data pgx.Trac
 // TraceAcquireStart is called at the beginning of Acquire.
 // The returned context is used for the rest of the call and will be passed to the TraceAcquireEnd.
 func (t *Tracer) TraceAcquireStart(ctx context.Context, pool *pgxpool.Pool, data pgxpool.TraceAcquireStartData) context.Context {
-	ctx = context.WithValue(ctx, startTimeCtxKey, time.Now())
+	ctx = context.WithValue(ctx, startTimeCtxKey{}, time.Now())
 
 	if !trace.SpanFromContext(ctx).IsRecording() {
 		return ctx
