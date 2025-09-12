@@ -158,7 +158,7 @@ func (t *Tracer) createMetrics() {
 	t.operationDuration, err = t.meter.Int64Histogram(
 		semconv.DBClientOperationDurationName,
 		metric.WithDescription(semconv.DBClientOperationDurationDescription),
-		metric.WithUnit("ms"),
+		metric.WithUnit(semconv.DBClientOperationDurationUnit),
 	)
 	if err != nil {
 		otel.Handle(err)
