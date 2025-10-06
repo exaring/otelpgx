@@ -4,12 +4,13 @@
 package otelpgx
 
 import (
+	"context"
 	"strings"
 )
 
-// defaultSpanNameFunc attempts to get the first 'word' from a given SQL query, which usually
+// defaultSpanNameCtxFunc attempts to get the first 'word' from a given SQL query, which usually
 // is the operation name (e.g. 'SELECT').
-func defaultSpanNameFunc(stmt string) string {
+func defaultSpanNameCtxFunc(_ context.Context, stmt string) string {
 	for word := range strings.FieldsSeq(stmt) {
 		return strings.ToUpper(word)
 	}
