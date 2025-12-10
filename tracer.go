@@ -135,13 +135,14 @@ func NewTracer(opts ...Option) *Tracer {
 				return &s
 			},
 		},
-		tracerAttrs:         cfg.tracerAttrs,
-		meterAttrs:          cfg.meterAttrs,
-		trimQuerySpanName:   cfg.trimQuerySpanName,
-		spanNameFunc:        cfg.spanNameFunc,
-		prefixQuerySpanName: cfg.prefixQuerySpanName,
-		logSQLStatement:     cfg.logSQLStatement,
-		includeParams:       cfg.includeParams,
+		tracerAttrs:          cfg.tracerAttrs,
+		meterAttrs:           cfg.meterAttrs,
+		trimQuerySpanName:    cfg.trimQuerySpanName,
+		spanNameFunc:         cfg.spanNameFunc,
+		prefixQuerySpanName:  cfg.prefixQuerySpanName,
+		logSQLStatement:      cfg.logSQLStatement,
+		logConnectionDetails: cfg.logConnectionDetails,
+		includeParams:        cfg.includeParams,
 	}
 
 	tracer.createMetrics()
