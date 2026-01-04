@@ -80,7 +80,6 @@ type Tracer struct {
 	logSQLStatement      bool
 	logConnectionDetails bool
 	includeParams        bool
-	disableTracing       bool
 }
 
 type tracerConfig struct {
@@ -96,7 +95,6 @@ type tracerConfig struct {
 	logSQLStatement      bool
 	logConnectionDetails bool
 	includeParams        bool
-	disableTracing       bool
 }
 
 // NewTracer returns a new Tracer.
@@ -145,7 +143,6 @@ func NewTracer(opts ...Option) *Tracer {
 		logSQLStatement:      cfg.logSQLStatement,
 		logConnectionDetails: cfg.logConnectionDetails,
 		includeParams:        cfg.includeParams,
-		disableTracing:      cfg.disableTracing,
 	}
 
 	tracer.createMetrics()
@@ -242,18 +239,12 @@ func connectionAttributesFromConfig(config *pgx.ConnConfig) []attribute.KeyValue
 	return nil
 }
 
-// skipTracing determines whether tracing operations are undesirable or worthless
-// and, therefore, should not be performed.
-func (t *Tracer) skipTracing(span trace.Span) bool {
-	return t.disableTracing || !span.IsRecording()
-}
-
 // TraceQueryStart is called at the beginning of Query, QueryRow, and Exec calls.
 // The returned context is used for the rest of the call and will be passed to TraceQueryEnd.
 func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
 	ctx = context.WithValue(ctx, startTimeCtxKey{}, time.Now())
 
-	if t.skipTracing(trace.SpanFromContext(ctx)) {
+	if !trace.SpanFromContext(ctx).IsRecording() {
 		return ctx
 	}
 
@@ -308,7 +299,7 @@ func (t *Tracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQ
 	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationQuery)
 	t.recordOperationDuration(ctx, pgxOperationQuery)
 
-	if t.skipTracing(span) {
+	if !span.IsRecording() {
 		return
 	}
 
@@ -327,7 +318,7 @@ func (t *Tracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQ
 func (t *Tracer) TraceCopyFromStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceCopyFromStartData) context.Context {
 	ctx = context.WithValue(ctx, startTimeCtxKey{}, time.Now())
 
-	if t.skipTracing(trace.SpanFromContext(ctx)) {
+	if !trace.SpanFromContext(ctx).IsRecording() {
 		return ctx
 	}
 
@@ -363,7 +354,7 @@ func (t *Tracer) TraceCopyFromEnd(ctx context.Context, _ *pgx.Conn, data pgx.Tra
 	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationCopy)
 	t.recordOperationDuration(ctx, pgxOperationCopy)
 
-	if t.skipTracing(span) {
+	if !span.IsRecording() {
 		return
 	}
 
@@ -381,7 +372,7 @@ func (t *Tracer) TraceCopyFromEnd(ctx context.Context, _ *pgx.Conn, data pgx.Tra
 func (t *Tracer) TraceBatchStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceBatchStartData) context.Context {
 	ctx = context.WithValue(ctx, startTimeCtxKey{}, time.Now())
 
-	if t.skipTracing(trace.SpanFromContext(ctx)) {
+	if !trace.SpanFromContext(ctx).IsRecording() {
 		return ctx
 	}
 
@@ -420,7 +411,7 @@ func (t *Tracer) TraceBatchStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.TraceBatchQueryData) {
 	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationBatch)
 
-	if t.skipTracing(trace.SpanFromContext(ctx)) {
+	if !trace.SpanFromContext(ctx).IsRecording() {
 		return
 	}
 
@@ -480,7 +471,7 @@ func (t *Tracer) TraceBatchEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceB
 	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationBatch)
 	t.recordOperationDuration(ctx, pgxOperationBatch)
 
-	if t.skipTracing(span) {
+	if !span.IsRecording() {
 		return
 	}
 
@@ -494,7 +485,7 @@ func (t *Tracer) TraceBatchEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceB
 func (t *Tracer) TraceConnectStart(ctx context.Context, data pgx.TraceConnectStartData) context.Context {
 	ctx = context.WithValue(ctx, startTimeCtxKey{}, time.Now())
 
-	if t.skipTracing(trace.SpanFromContext(ctx)) {
+	if !trace.SpanFromContext(ctx).IsRecording() {
 		return ctx
 	}
 
@@ -529,7 +520,7 @@ func (t *Tracer) TraceConnectEnd(ctx context.Context, data pgx.TraceConnectEndDa
 	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationConnect)
 	t.recordOperationDuration(ctx, pgxOperationConnect)
 
-	if t.skipTracing(span) {
+	if !span.IsRecording() {
 		return
 	}
 
@@ -543,7 +534,7 @@ func (t *Tracer) TraceConnectEnd(ctx context.Context, data pgx.TraceConnectEndDa
 func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx.TracePrepareStartData) context.Context {
 	ctx = context.WithValue(ctx, startTimeCtxKey{}, time.Now())
 
-	if t.skipTracing(trace.SpanFromContext(ctx)) {
+	if !trace.SpanFromContext(ctx).IsRecording() {
 		return ctx
 	}
 
@@ -596,7 +587,7 @@ func (t *Tracer) TracePrepareEnd(ctx context.Context, _ *pgx.Conn, data pgx.Trac
 	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationPrepare)
 	t.recordOperationDuration(ctx, pgxOperationPrepare)
 
-	if t.skipTracing(span) {
+	if !span.IsRecording() {
 		return
 	}
 
@@ -609,7 +600,7 @@ func (t *Tracer) TracePrepareEnd(ctx context.Context, _ *pgx.Conn, data pgx.Trac
 func (t *Tracer) TraceAcquireStart(ctx context.Context, pool *pgxpool.Pool, data pgxpool.TraceAcquireStartData) context.Context {
 	ctx = context.WithValue(ctx, startTimeCtxKey{}, time.Now())
 
-	if t.skipTracing(trace.SpanFromContext(ctx)) {
+	if !trace.SpanFromContext(ctx).IsRecording() {
 		return ctx
 	}
 
@@ -644,7 +635,7 @@ func (t *Tracer) TraceAcquireEnd(ctx context.Context, _ *pgxpool.Pool, data pgxp
 	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationAcquire)
 	t.recordOperationDuration(ctx, pgxOperationAcquire)
 
-	if t.skipTracing(span) {
+	if !span.IsRecording() {
 		return
 	}
 

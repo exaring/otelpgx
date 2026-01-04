@@ -117,14 +117,6 @@ func WithIncludeQueryParameters() Option {
 	})
 }
 
-// WithDisableTracing will disable tracing operations minimizing performance overhead it brings.
-// Metrics operations are not affected by this option and will still be performed.
-func WithDisableTracing() Option {
-	return optionFunc(func(cfg *tracerConfig) {
-		cfg.disableTracing = true
-	})
-}
-
 // StatsOption allows for managing RecordStats configuration using functional options.
 type StatsOption interface {
 	applyStatsOptions(o *statsOptions)
