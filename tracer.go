@@ -296,16 +296,20 @@ func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 // TraceQueryEnd is called at the end of Query, QueryRow, and Exec calls.
 func (t *Tracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
 	span := trace.SpanFromContext(ctx)
-	recordSpanError(span, data.Err)
 	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationQuery)
+	t.recordOperationDuration(ctx, pgxOperationQuery)
+
+	if !span.IsRecording() {
+		return
+	}
+
+	recordSpanError(span, data.Err)
 
 	if data.Err == nil {
 		span.SetAttributes(RowsAffectedKey.Int64(data.CommandTag.RowsAffected()))
 	}
 
 	span.End()
-
-	t.recordOperationDuration(ctx, pgxOperationQuery)
 }
 
 // TraceCopyFromStart is called at the beginning of CopyFrom calls. The
@@ -347,16 +351,19 @@ func (t *Tracer) TraceCopyFromStart(ctx context.Context, conn *pgx.Conn, data pg
 // TraceCopyFromEnd is called at the end of CopyFrom calls.
 func (t *Tracer) TraceCopyFromEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceCopyFromEndData) {
 	span := trace.SpanFromContext(ctx)
-	recordSpanError(span, data.Err)
 	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationCopy)
+	t.recordOperationDuration(ctx, pgxOperationCopy)
+
+	if !span.IsRecording() {
+		return
+	}
 
 	if data.Err == nil {
 		span.SetAttributes(RowsAffectedKey.Int64(data.CommandTag.RowsAffected()))
 	}
 
+	recordSpanError(span, data.Err)
 	span.End()
-
-	t.recordOperationDuration(ctx, pgxOperationCopy)
 }
 
 // TraceBatchStart is called at the beginning of SendBatch calls. The returned
@@ -461,12 +468,15 @@ func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.T
 // TraceBatchEnd is called at the end of SendBatch calls.
 func (t *Tracer) TraceBatchEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceBatchEndData) {
 	span := trace.SpanFromContext(ctx)
-	recordSpanError(span, data.Err)
 	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationBatch)
-
-	span.End()
-
 	t.recordOperationDuration(ctx, pgxOperationBatch)
+
+	if !span.IsRecording() {
+		return
+	}
+
+	recordSpanError(span, data.Err)
+	span.End()
 }
 
 // TraceConnectStart is called at the beginning of Connect and ConnectConfig
@@ -507,12 +517,15 @@ func (t *Tracer) TraceConnectStart(ctx context.Context, data pgx.TraceConnectSta
 // TraceConnectEnd is called at the end of Connect and ConnectConfig calls.
 func (t *Tracer) TraceConnectEnd(ctx context.Context, data pgx.TraceConnectEndData) {
 	span := trace.SpanFromContext(ctx)
-	recordSpanError(span, data.Err)
 	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationConnect)
-
-	span.End()
-
 	t.recordOperationDuration(ctx, pgxOperationConnect)
+
+	if !span.IsRecording() {
+		return
+	}
+
+	recordSpanError(span, data.Err)
+	span.End()
 }
 
 // TracePrepareStart is called at the beginning of Prepare calls. The returned
@@ -571,12 +584,15 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 // TracePrepareEnd is called at the end of Prepare calls.
 func (t *Tracer) TracePrepareEnd(ctx context.Context, _ *pgx.Conn, data pgx.TracePrepareEndData) {
 	span := trace.SpanFromContext(ctx)
-	recordSpanError(span, data.Err)
 	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationPrepare)
-
-	span.End()
-
 	t.recordOperationDuration(ctx, pgxOperationPrepare)
+
+	if !span.IsRecording() {
+		return
+	}
+
+	recordSpanError(span, data.Err)
+	span.End()
 }
 
 // TraceAcquireStart is called at the beginning of Acquire.
@@ -616,12 +632,15 @@ func (t *Tracer) TraceAcquireStart(ctx context.Context, pool *pgxpool.Pool, data
 // TraceAcquireEnd is called when a connection has been acquired.
 func (t *Tracer) TraceAcquireEnd(ctx context.Context, _ *pgxpool.Pool, data pgxpool.TraceAcquireEndData) {
 	span := trace.SpanFromContext(ctx)
-	recordSpanError(span, data.Err)
 	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationAcquire)
-
-	span.End()
-
 	t.recordOperationDuration(ctx, pgxOperationAcquire)
+
+	if !span.IsRecording() {
+		return
+	}
+
+	recordSpanError(span, data.Err)
+	span.End()
 }
 
 func makeParamsAttribute(args []any) attribute.KeyValue {
