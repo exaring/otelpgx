@@ -4,13 +4,14 @@
 package otelpgx
 
 import (
+	"context"
 	"strings"
 	"unicode"
 )
 
-// defaultSpanNameFunc attempts to get the first 'word' from a given SQL query, which usually
+// defaultSpanNameCtxFunc attempts to get the first 'word' from a given SQL query, which usually
 // is the operation name (e.g. 'SELECT').
-func defaultSpanNameFunc(stmt string) string {
+func defaultSpanNameCtxFunc(_ context.Context, stmt string) string {
 	stmt = strings.TrimSpace(stmt)
 	end := strings.IndexFunc(stmt, unicode.IsSpace)
 	if end < 0 && len(stmt) > 0 {

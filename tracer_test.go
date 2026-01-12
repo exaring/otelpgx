@@ -1,6 +1,7 @@
 package otelpgx
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -88,7 +89,7 @@ func TestTracer_sqlOperationName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tr := tt.tracer
-			if got := tr.spanNameFunc(tt.query); got != tt.expName {
+			if got := tr.spanNameCtxFunc(context.TODO(), tt.query); got != tt.expName {
 				t.Errorf("Tracer.sqlOperationName() = %v, want %v", got, tt.expName)
 			}
 		})
@@ -136,4 +137,40 @@ var testSpanNameFunc SpanNameFunc = func(query string) string {
 		return queryName + " " + queryType
 	}
 	return sqlOperationUnknown
+}
+
+func TestTracer_sqlOperationNameFromCtx(t *testing.T) {
+	spanNameCtxFunc := func(ctx context.Context, query string) string {
+		if v := ctx.Value("spanName"); v != nil {
+			if name, ok := v.(string); ok && name != "" {
+				return name
+			}
+		}
+		return "UNKNOWN"
+	}
+	tracer := NewTracer(WithSpanNameCtxFunc(spanNameCtxFunc))
+
+	tests := []struct {
+		desc string
+		ctx  context.Context
+		exp  string
+	}{
+		{
+			desc: "With span name in context",
+			ctx:  context.WithValue(context.TODO(), "spanName", "MyCustomSpanName"),
+			exp:  "MyCustomSpanName",
+		},
+		{
+			desc: "Without span name in context",
+			ctx:  context.TODO(),
+			exp:  "UNKNOWN",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			if got := tracer.spanNameCtxFunc(tt.ctx, "SELECT * FROM users"); got != tt.exp {
+				t.Errorf("Tracer.sqlOperationName() = %v, want %v", got, tt.exp)
+			}
+		})
+	}
 }
