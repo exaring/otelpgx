@@ -37,11 +37,18 @@ const (
 // RecordStats records database statistics for provided pgxpool.Pool at a default 1 second interval
 // unless otherwise specified by the WithMinimumReadDBStatsInterval StatsOption.
 func RecordStats(db PoolStats, opts ...StatsOption) error {
+	serverAddress := semconv.ServerAddress(db.Config().ConnConfig.Host)
+	serverPort := semconv.ServerPort(int(db.Config().ConnConfig.Port))
+	dbNamespace := semconv.DBNamespace(db.Config().ConnConfig.Database)
+	poolName := fmt.Sprintf("%s:%d/%s", serverAddress.Value.AsString(), serverPort.Value.AsInt64(), dbNamespace.Value.AsString())
+	dbClientConnectionPoolName := semconv.DBClientConnectionPoolName(poolName)
+
 	o := statsOptions{
 		meterProvider:              otel.GetMeterProvider(),
 		minimumReadDBStatsInterval: defaultMinimumReadDBStatsInterval,
 		defaultAttributes: []attribute.KeyValue{
 			semconv.DBSystemPostgreSQL,
+			dbClientConnectionPoolName,
 		},
 	}
 
@@ -92,12 +99,6 @@ func recordStats(
 		// lock prevents a race between batch observer and instrument registration.
 		lock sync.Mutex
 	)
-
-	serverAddress := semconv.ServerAddress(db.Config().ConnConfig.Host)
-	serverPort := semconv.ServerPort(int(db.Config().ConnConfig.Port))
-	dbNamespace := semconv.DBNamespace(db.Config().ConnConfig.Database)
-	poolName := fmt.Sprintf("%s:%d/%s", serverAddress.Value.AsString(), serverPort.Value.AsInt64(), dbNamespace.Value.AsString())
-	dbClientConnectionPoolName := semconv.DBClientConnectionPoolName(poolName)
 
 	lock.Lock()
 	defer lock.Unlock()
@@ -194,11 +195,6 @@ func recordStats(
 	); err != nil {
 		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolEmptyAcquireWaitTime, err)
 	}
-
-	attrs = append(attrs, []attribute.KeyValue{
-		semconv.DBSystemPostgreSQL,
-		dbClientConnectionPoolName,
-	}...)
 
 	observeOptions = []metric.ObserveOption{
 		metric.WithAttributeSet(attribute.NewSet(attrs...)),
