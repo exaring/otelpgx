@@ -71,7 +71,7 @@ type Tracer struct {
 	attributeSlicePool   sync.Pool
 	metricAttrs          map[string]attribute.Set
 
-	operationDuration metric.Int64Histogram
+	operationDuration metric.Float64Histogram
 	operationErrors   metric.Int64Counter
 
 	trimQuerySpanName    bool
@@ -155,7 +155,7 @@ func NewTracer(opts ...Option) *Tracer {
 func (t *Tracer) createMetrics() {
 	var err error
 
-	t.operationDuration, err = t.meter.Int64Histogram(
+	t.operationDuration, err = t.meter.Float64Histogram(
 		semconv.DBClientOperationDurationName,
 		metric.WithDescription(semconv.DBClientOperationDurationDescription),
 		metric.WithUnit(semconv.DBClientOperationDurationUnit),
@@ -217,7 +217,7 @@ func (t *Tracer) incrementOperationErrorCount(ctx context.Context, err error, pg
 // recordOperationDuration will compute and record the time since the start of an operation.
 func (t *Tracer) recordOperationDuration(ctx context.Context, pgxOperation string) {
 	if startTime, ok := ctx.Value(startTimeCtxKey{}).(time.Time); ok {
-		t.operationDuration.Record(ctx, time.Since(startTime).Milliseconds(), metric.WithAttributeSet(
+		t.operationDuration.Record(ctx, time.Since(startTime).Seconds(), metric.WithAttributeSet(
 			t.metricAttrs[pgxOperation],
 		))
 	}
