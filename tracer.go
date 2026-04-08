@@ -116,7 +116,7 @@ func NewTracer(opts ...Option) *Tracer {
 		logSQLStatement:      true,
 		logConnectionDetails: true,
 		includeParams:        false,
-		disableAcquireTracer: true,
+		disableAcquireTracer: false,
 	}
 
 	for _, opt := range opts {
