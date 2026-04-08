@@ -71,6 +71,14 @@ func WithTrimSQLInSpanName() Option {
 	})
 }
 
+// WithDisableAcquireTracer disables tracing for connection acquire events from
+// the connection pool. By default, acquire tracing is enabled.
+func WithDisableAcquireTracer() Option {
+	return optionFunc(func(cfg *tracerConfig) {
+		cfg.disableAcquireTracer = true
+	})
+}
+
 // SpanNameFunc is a function that can be used to generate a span name for a
 // SQL. The function will be called with the SQL statement as a parameter.
 type SpanNameFunc func(stmt string) string
