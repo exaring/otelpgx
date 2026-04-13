@@ -10,7 +10,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
-	semconv "go.opentelemetry.io/otel/semconv/v1.27.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
 )
 
 const (
@@ -41,7 +41,7 @@ func RecordStats(db PoolStats, opts ...StatsOption) error {
 		meterProvider:              otel.GetMeterProvider(),
 		minimumReadDBStatsInterval: defaultMinimumReadDBStatsInterval,
 		defaultAttributes: []attribute.KeyValue{
-			semconv.DBSystemPostgreSQL,
+			semconv.DBSystemNamePostgreSQL,
 		},
 	}
 
@@ -195,10 +195,7 @@ func recordStats(
 		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolEmptyAcquireWaitTime, err)
 	}
 
-	attrs = append(attrs, []attribute.KeyValue{
-		semconv.DBSystemPostgreSQL,
-		dbClientConnectionPoolName,
-	}...)
+	attrs = append(attrs, dbClientConnectionPoolName)
 
 	observeOptions = []metric.ObserveOption{
 		metric.WithAttributeSet(attribute.NewSet(attrs...)),

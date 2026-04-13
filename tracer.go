@@ -16,7 +16,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
-	semconv "go.opentelemetry.io/otel/semconv/v1.27.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
+	dbconv "go.opentelemetry.io/otel/semconv/v1.40.0/dbconv"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -71,7 +72,7 @@ type Tracer struct {
 	attributeSlicePool   sync.Pool
 	metricAttrs          map[string]attribute.Set
 
-	operationDuration metric.Int64Histogram
+	operationDuration dbconv.ClientOperationDuration
 	operationErrors   metric.Int64Counter
 
 	trimQuerySpanName    bool
@@ -103,10 +104,10 @@ func NewTracer(opts ...Option) *Tracer {
 		tracerProvider: otel.GetTracerProvider(),
 		meterProvider:  otel.GetMeterProvider(),
 		tracerAttrs: []attribute.KeyValue{
-			semconv.DBSystemPostgreSQL,
+			semconv.DBSystemNamePostgreSQL,
 		},
 		meterAttrs: []attribute.KeyValue{
-			semconv.DBSystemPostgreSQL,
+			semconv.DBSystemNamePostgreSQL,
 		},
 		trimQuerySpanName:    false,
 		spanNameCtxFunc:      defaultSpanNameCtxFunc,
@@ -155,11 +156,7 @@ func NewTracer(opts ...Option) *Tracer {
 func (t *Tracer) createMetrics() {
 	var err error
 
-	t.operationDuration, err = t.meter.Int64Histogram(
-		semconv.DBClientOperationDurationName,
-		metric.WithDescription(semconv.DBClientOperationDurationDescription),
-		metric.WithUnit(semconv.DBClientOperationDurationUnit),
-	)
+	t.operationDuration, err = dbconv.NewClientOperationDuration(t.meter)
 	if err != nil {
 		otel.Handle(err)
 	}
@@ -217,9 +214,7 @@ func (t *Tracer) incrementOperationErrorCount(ctx context.Context, err error, pg
 // recordOperationDuration will compute and record the time since the start of an operation.
 func (t *Tracer) recordOperationDuration(ctx context.Context, pgxOperation string) {
 	if startTime, ok := ctx.Value(startTimeCtxKey{}).(time.Time); ok {
-		t.operationDuration.Record(ctx, time.Since(startTime).Milliseconds(), metric.WithAttributeSet(
-			t.metricAttrs[pgxOperation],
-		))
+		t.operationDuration.RecordSet(ctx, time.Since(startTime).Seconds(), t.metricAttrs[pgxOperation])
 	}
 }
 
@@ -228,7 +223,7 @@ func (t *Tracer) recordOperationDuration(ctx context.Context, pgxOperation strin
 func connectionAttributesFromConfig(config *pgx.ConnConfig) []attribute.KeyValue {
 	if config != nil {
 		return []attribute.KeyValue{
-			semconv.DBSystemPostgreSQL,
+			semconv.DBSystemNamePostgreSQL,
 			semconv.ServerAddress(config.Host),
 			semconv.ServerPort(int(config.Port)),
 			semconv.UserName(config.User),
