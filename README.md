@@ -7,7 +7,7 @@ instrumentation for the [jackc/pgx](https://github.com/jackc/pgx) library.
 
 ## Requirements
 
-- go 1.22 (or higher)
+- go 1.25 (or higher)
 - pgx v5 (or higher)
 
 ## Usage
