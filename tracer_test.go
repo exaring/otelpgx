@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestTracer_sqlOperationName(t *testing.T) {
@@ -88,10 +90,7 @@ func TestTracer_sqlOperationName(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tr := tt.tracer
-			if got := tr.spanNameCtxFunc(context.TODO(), tt.query); got != tt.expName {
-				t.Errorf("Tracer.sqlOperationName() = %v, want %v", got, tt.expName)
-			}
+			assert.Equal(t, tt.expName, tt.tracer.spanNameCtxFunc(context.TODO(), tt.query))
 		})
 	}
 }
@@ -168,9 +167,7 @@ func TestTracer_sqlOperationNameFromCtx(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.desc, func(t *testing.T) {
-			if got := tracer.spanNameCtxFunc(tt.ctx, "SELECT * FROM users"); got != tt.exp {
-				t.Errorf("Tracer.sqlOperationName() = %v, want %v", got, tt.exp)
-			}
+			assert.Equal(t, tt.exp, tracer.spanNameCtxFunc(tt.ctx, "SELECT * FROM users"))
 		})
 	}
 }
