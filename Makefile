@@ -8,12 +8,8 @@ test: vet
 
 .PHONY: lint
 lint:
-	golint ./...
+	golangci-lint run ./...
 
 .PHONY: vet
 vet:
 	$(GO) vet ./...
-
-.PHONY: deps
-deps:
-	go get -u golang.org/x/lint/golint
