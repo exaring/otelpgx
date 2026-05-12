@@ -138,9 +138,11 @@ var testSpanNameFunc SpanNameFunc = func(query string) string {
 	return sqlOperationUnknown
 }
 
+type spanNameCtxKey struct{}
+
 func TestTracer_sqlOperationNameFromCtx(t *testing.T) {
 	spanNameCtxFunc := func(ctx context.Context, query string) string {
-		if v := ctx.Value("spanName"); v != nil {
+		if v := ctx.Value(spanNameCtxKey{}); v != nil {
 			if name, ok := v.(string); ok && name != "" {
 				return name
 			}
@@ -156,7 +158,7 @@ func TestTracer_sqlOperationNameFromCtx(t *testing.T) {
 	}{
 		{
 			desc: "With span name in context",
-			ctx:  context.WithValue(context.TODO(), "spanName", "MyCustomSpanName"),
+			ctx:  context.WithValue(context.TODO(), spanNameCtxKey{}, "MyCustomSpanName"),
 			exp:  "MyCustomSpanName",
 		},
 		{
