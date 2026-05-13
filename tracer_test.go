@@ -2,10 +2,17 @@ package otelpgx
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/stretchr/testify/assert"
+	"go.opentelemetry.io/otel/attribute"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 func TestTracer_sqlOperationName(t *testing.T) {
@@ -170,6 +177,221 @@ func TestTracer_sqlOperationNameFromCtx(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.desc, func(t *testing.T) {
 			assert.Equal(t, tt.exp, tracer.spanNameCtxFunc(tt.ctx, "SELECT * FROM users"))
+		})
+	}
+}
+
+// newMockConn creates a *pgx.Conn with the given connection details, backed
+// by a fake PostgreSQL server over net.Pipe — no real database needed.
+func newMockConn(t *testing.T, host string, port uint16, user, database string) *pgx.Conn {
+	t.Helper()
+
+	client, server := net.Pipe()
+	errCh := make(chan error, 1)
+
+	go func() {
+		defer server.Close()
+
+		b := pgproto3.NewBackend(server, server)
+		if _, err := b.ReceiveStartupMessage(); err != nil {
+			errCh <- fmt.Errorf("receive startup: %w", err)
+			return
+		}
+
+		for _, msg := range []pgproto3.BackendMessage{
+			&pgproto3.AuthenticationOk{},
+			&pgproto3.BackendKeyData{},
+			&pgproto3.ReadyForQuery{TxStatus: 'I'},
+		} {
+			b.Send(msg)
+		}
+		if err := b.Flush(); err != nil {
+			errCh <- fmt.Errorf("flush: %w", err)
+			return
+		}
+
+		// Drain until the client disconnects or sends Terminate.
+		for {
+			msg, err := b.Receive()
+			if err != nil {
+				break
+			}
+			if _, ok := msg.(*pgproto3.Terminate); ok {
+				break
+			}
+		}
+		errCh <- nil
+	}()
+
+	dsn := fmt.Sprintf("postgres://%s@%s:%d/%s?sslmode=disable", user, host, int(port), database)
+	config, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("parse config: %v", err)
+	}
+	config.LookupFunc = func(ctx context.Context, host string) ([]string, error) {
+		return []string{host}, nil
+	}
+	config.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return client, nil
+	}
+
+	conn, err := pgx.ConnectConfig(context.Background(), config)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+
+	t.Cleanup(func() {
+		conn.Close(context.Background())
+		if serverErr := <-errCh; serverErr != nil {
+			t.Errorf("mock server: %v", serverErr)
+		}
+	})
+
+	return conn
+}
+
+// findAttr returns the value for the given key in the attribute slice, and
+// whether it was found.
+func findAttr(attrs []attribute.KeyValue, key string) (attribute.Value, bool) {
+	for _, a := range attrs {
+		if string(a.Key) == key {
+			return a.Value, true
+		}
+	}
+	return attribute.Value{}, false
+}
+
+func TestTracer_spanAttributes(t *testing.T) {
+	conn := newMockConn(t, "fakehost", 5432, "fakeuser", "fakedb")
+
+	tests := []struct {
+		name         string
+		opts         []Option
+		drive        func(ctx context.Context, tracer *Tracer, conn *pgx.Conn)
+		wantStrAttrs map[string]string
+		wantIntAttrs map[string]int64
+		absentAttrs  []string
+	}{
+		{
+			name: "query default",
+			drive: func(ctx context.Context, tracer *Tracer, conn *pgx.Conn) {
+				ctx = tracer.TraceQueryStart(ctx, conn, pgx.TraceQueryStartData{SQL: "SELECT * FROM users"})
+				tracer.TraceQueryEnd(ctx, conn, pgx.TraceQueryEndData{})
+			},
+			wantStrAttrs: map[string]string{
+				"db.system.name":    "postgresql",
+				"server.address":    "fakehost",
+				"user.name":         "fakeuser",
+				"db.namespace":      "fakedb",
+				"db.query.text":     "SELECT * FROM users",
+				"db.operation.name": "SELECT",
+			},
+			wantIntAttrs: map[string]int64{
+				"server.port": 5432,
+			},
+		},
+		{
+			name: "query without connection details",
+			opts: []Option{WithDisableConnectionDetailsInAttributes()},
+			drive: func(ctx context.Context, tracer *Tracer, conn *pgx.Conn) {
+				ctx = tracer.TraceQueryStart(ctx, conn, pgx.TraceQueryStartData{SQL: "SELECT * FROM users"})
+				tracer.TraceQueryEnd(ctx, conn, pgx.TraceQueryEndData{})
+			},
+			wantStrAttrs: map[string]string{
+				"db.system.name":    "postgresql",
+				"db.query.text":     "SELECT * FROM users",
+				"db.operation.name": "SELECT",
+			},
+			absentAttrs: []string{"server.address", "server.port", "user.name", "db.namespace"},
+		},
+		{
+			name: "query without SQL statement",
+			opts: []Option{WithDisableSQLStatementInAttributes()},
+			drive: func(ctx context.Context, tracer *Tracer, conn *pgx.Conn) {
+				ctx = tracer.TraceQueryStart(ctx, conn, pgx.TraceQueryStartData{SQL: "SELECT * FROM users"})
+				tracer.TraceQueryEnd(ctx, conn, pgx.TraceQueryEndData{})
+			},
+			wantStrAttrs: map[string]string{
+				"db.system.name": "postgresql",
+				"server.address": "fakehost",
+				"user.name":      "fakeuser",
+				"db.namespace":   "fakedb",
+			},
+			wantIntAttrs: map[string]int64{
+				"server.port": 5432,
+			},
+			absentAttrs: []string{"db.query.text", "db.operation.name"},
+		},
+		{
+			name: "query with parameters included",
+			opts: []Option{WithIncludeQueryParameters()},
+			drive: func(ctx context.Context, tracer *Tracer, conn *pgx.Conn) {
+				ctx = tracer.TraceQueryStart(ctx, conn, pgx.TraceQueryStartData{
+					SQL:  "SELECT * FROM users WHERE id = $1",
+					Args: []any{42},
+				})
+				tracer.TraceQueryEnd(ctx, conn, pgx.TraceQueryEndData{})
+			},
+			wantStrAttrs: map[string]string{
+				"db.system.name":    "postgresql",
+				"server.address":    "fakehost",
+				"user.name":         "fakeuser",
+				"db.namespace":      "fakedb",
+				"db.query.text":     "SELECT * FROM users WHERE id = $1",
+				"db.operation.name": "SELECT",
+			},
+			wantIntAttrs: map[string]int64{
+				"server.port": 5432,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			exporter := tracetest.NewInMemoryExporter()
+			tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+			defer tp.Shutdown(context.Background())
+
+			opts := append([]Option{WithTracerProvider(tp)}, tt.opts...)
+			tracer := NewTracer(opts...)
+
+			ctx, parentSpan := tp.Tracer("test").Start(context.Background(), "parent")
+			tt.drive(ctx, tracer, conn)
+			parentSpan.End()
+
+			spans := exporter.GetSpans()
+			if len(spans) < 1 {
+				t.Fatal("no spans recorded")
+			}
+			span := spans[0]
+
+			for key, want := range tt.wantStrAttrs {
+				v, ok := findAttr(span.Attributes, key)
+				if !ok {
+					t.Errorf("missing attribute %q", key)
+					continue
+				}
+				if got := v.AsString(); got != want {
+					t.Errorf("attr %q = %q, want %q", key, got, want)
+				}
+			}
+
+			for key, want := range tt.wantIntAttrs {
+				v, ok := findAttr(span.Attributes, key)
+				if !ok {
+					t.Errorf("missing attribute %q", key)
+					continue
+				}
+				if got := v.AsInt64(); got != want {
+					t.Errorf("attr %q = %d, want %d", key, got, want)
+				}
+			}
+
+			for _, key := range tt.absentAttrs {
+				if _, ok := findAttr(span.Attributes, key); ok {
+					t.Errorf("unexpected attribute %q present", key)
+				}
+			}
 		})
 	}
 }
