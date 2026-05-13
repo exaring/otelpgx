@@ -145,6 +145,7 @@ func NewTracer(opts ...Option) *Tracer {
 		spanNameCtxFunc:      cfg.spanNameCtxFunc,
 		prefixQuerySpanName:  cfg.prefixQuerySpanName,
 		logSQLStatement:      cfg.logSQLStatement,
+		logConnectionDetails: cfg.logConnectionDetails,
 		includeParams:        cfg.includeParams,
 		disableAcquireTracer: cfg.disableAcquireTracer,
 	}
