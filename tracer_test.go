@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/attribute"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -200,7 +201,7 @@ func newMockConn(t *testing.T, host string, port uint16, user, database string) 
 
 		for _, msg := range []pgproto3.BackendMessage{
 			&pgproto3.AuthenticationOk{},
-			&pgproto3.BackendKeyData{},
+			&pgproto3.BackendKeyData{SecretKey: make([]byte, 4)},
 			&pgproto3.ReadyForQuery{TxStatus: 'I'},
 		} {
 			b.Send(msg)
@@ -225,9 +226,8 @@ func newMockConn(t *testing.T, host string, port uint16, user, database string) 
 
 	dsn := fmt.Sprintf("postgres://%s@%s:%d/%s?sslmode=disable", user, host, int(port), database)
 	config, err := pgx.ParseConfig(dsn)
-	if err != nil {
-		t.Fatalf("parse config: %v", err)
-	}
+	require.NoError(t, err)
+
 	config.LookupFunc = func(ctx context.Context, host string) ([]string, error) {
 		return []string{host}, nil
 	}
@@ -236,9 +236,7 @@ func newMockConn(t *testing.T, host string, port uint16, user, database string) 
 	}
 
 	conn, err := pgx.ConnectConfig(context.Background(), config)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
+	require.NoError(t, err)
 
 	t.Cleanup(func() {
 		conn.Close(context.Background())
@@ -360,37 +358,25 @@ func TestTracer_spanAttributes(t *testing.T) {
 			parentSpan.End()
 
 			spans := exporter.GetSpans()
-			if len(spans) < 1 {
-				t.Fatal("no spans recorded")
-			}
+			require.Greater(t, len(spans), 0, "no spans recorded")
+
 			span := spans[0]
 
 			for key, want := range tt.wantStrAttrs {
 				v, ok := findAttr(span.Attributes, key)
-				if !ok {
-					t.Errorf("missing attribute %q", key)
-					continue
-				}
-				if got := v.AsString(); got != want {
-					t.Errorf("attr %q = %q, want %q", key, got, want)
-				}
+				require.Truef(t, ok, "missing attribute %q", key)
+				require.Equalf(t, want, v.AsString(), "attr %q = %q, want %q", key, v.AsString(), want)
 			}
 
 			for key, want := range tt.wantIntAttrs {
 				v, ok := findAttr(span.Attributes, key)
-				if !ok {
-					t.Errorf("missing attribute %q", key)
-					continue
-				}
-				if got := v.AsInt64(); got != want {
-					t.Errorf("attr %q = %d, want %d", key, got, want)
-				}
+				require.Truef(t, ok, "missing attribute %q", key)
+				require.Equalf(t, want, v.AsInt64(), "attr %q = %q, want %d", key, v.AsInt64(), want)
 			}
 
 			for _, key := range tt.absentAttrs {
-				if _, ok := findAttr(span.Attributes, key); ok {
-					t.Errorf("unexpected attribute %q present", key)
-				}
+				_, ok := findAttr(span.Attributes, key)
+				require.Falsef(t, ok, "unexpected attribute %q present")
 			}
 		})
 	}
