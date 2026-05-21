@@ -34,7 +34,7 @@ const (
 	pgxPoolEmptyAcquireWaitTime    = "pgxpool.empty_acquire_wait_time"
 )
 
-// RecordStats records database statistics for provided pgxpool.Pool at a default 1 second interval
+// RecordStats records database statistics for provided [pgxpool.Pool] at a default 1 second interval
 // unless otherwise specified by the WithMinimumReadDBStatsInterval StatsOption.
 //
 // Attributes provided via WithStatsAttributes override the library-supplied defaults
