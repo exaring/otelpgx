@@ -191,11 +191,17 @@ func newMockConn(t *testing.T, host string, port uint16, user, database string) 
 	errCh := make(chan error, 1)
 
 	go func() {
-		defer server.Close()
+		var gErr error
+		defer func() {
+			if err := server.Close(); err != nil && gErr == nil {
+				gErr = fmt.Errorf("server close: %w", err)
+			}
+			errCh <- gErr
+		}()
 
 		b := pgproto3.NewBackend(server, server)
 		if _, err := b.ReceiveStartupMessage(); err != nil {
-			errCh <- fmt.Errorf("receive startup: %w", err)
+			gErr = fmt.Errorf("receive startup: %w", err)
 			return
 		}
 
@@ -207,7 +213,7 @@ func newMockConn(t *testing.T, host string, port uint16, user, database string) 
 			b.Send(msg)
 		}
 		if err := b.Flush(); err != nil {
-			errCh <- fmt.Errorf("flush: %w", err)
+			gErr = fmt.Errorf("flush: %w", err)
 			return
 		}
 
@@ -221,7 +227,6 @@ func newMockConn(t *testing.T, host string, port uint16, user, database string) 
 				break
 			}
 		}
-		errCh <- nil
 	}()
 
 	dsn := fmt.Sprintf("postgres://%s@%s:%d/%s?sslmode=disable", user, host, int(port), database)
@@ -239,7 +244,9 @@ func newMockConn(t *testing.T, host string, port uint16, user, database string) 
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		conn.Close(context.Background())
+		if err := conn.Close(context.Background()); err != nil {
+			t.Errorf("close conn: %v", err)
+		}
 		if serverErr := <-errCh; serverErr != nil {
 			t.Errorf("mock server: %v", serverErr)
 		}
@@ -348,7 +355,7 @@ func TestTracer_spanAttributes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			exporter := tracetest.NewInMemoryExporter()
 			tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
-			defer tp.Shutdown(context.Background())
+			t.Cleanup(func() { require.NoError(t, tp.Shutdown(context.Background())) })
 
 			opts := append([]Option{WithTracerProvider(tp)}, tt.opts...)
 			tracer := NewTracer(opts...)
