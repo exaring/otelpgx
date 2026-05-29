@@ -106,6 +106,7 @@ func WithSpanNameFunc(fn SpanNameFunc) Option {
 // By default, the whole SQL statement is used as a span name, where applicable.
 func WithSpanNameCtxFunc(fn SpanNameCtxFunc) Option {
 	return optionFunc(func(cfg *tracerConfig) {
+		cfg.trimQuerySpanName = true
 		cfg.spanNameCtxFunc = fn
 	})
 }
