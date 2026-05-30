@@ -17,7 +17,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
 	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
-	dbconv "go.opentelemetry.io/otel/semconv/v1.40.0/dbconv"
+	"go.opentelemetry.io/otel/semconv/v1.40.0/dbconv"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -161,7 +161,12 @@ func NewTracer(opts ...Option) *Tracer {
 func (t *Tracer) createMetrics() {
 	var err error
 
-	t.operationDuration, err = dbconv.NewClientOperationDuration(t.meter)
+	t.operationDuration, err = dbconv.NewClientOperationDuration(
+		t.meter,
+		metric.WithExplicitBucketBoundaries(
+			0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5, 10,
+		),
+	)
 	if err != nil {
 		otel.Handle(err)
 	}
