@@ -388,3 +388,106 @@ func TestTracer_spanAttributes(t *testing.T) {
 		})
 	}
 }
+
+func TestTracer_spanName(t *testing.T) {
+	conn := newMockConn(t, "fakehost", 5432, "fakeuser", "fakedb")
+
+	const sql = "SELECT * FROM users"
+
+	query := func(ctx context.Context, tracer *Tracer, conn *pgx.Conn) {
+		ctx = tracer.TraceQueryStart(ctx, conn, pgx.TraceQueryStartData{SQL: sql})
+		tracer.TraceQueryEnd(ctx, conn, pgx.TraceQueryEndData{})
+	}
+	prepare := func(ctx context.Context, tracer *Tracer, conn *pgx.Conn) {
+		ctx = tracer.TracePrepareStart(ctx, conn, pgx.TracePrepareStartData{Name: "stmt1", SQL: sql})
+		tracer.TracePrepareEnd(ctx, conn, pgx.TracePrepareEndData{})
+	}
+	batch := func(ctx context.Context, tracer *Tracer, conn *pgx.Conn) {
+		tracer.TraceBatchQuery(ctx, conn, pgx.TraceBatchQueryData{SQL: sql})
+	}
+
+	tests := []struct {
+		name     string
+		opts     []Option
+		drive    func(ctx context.Context, tracer *Tracer, conn *pgx.Conn)
+		wantName string
+	}{
+		{
+			name:     "query defaults to operation name",
+			drive:    query,
+			wantName: "SELECT",
+		},
+		{
+			name:     "prepare defaults to operation name",
+			drive:    prepare,
+			wantName: "SELECT",
+		},
+		{
+			name:     "batch query defaults to operation name",
+			drive:    batch,
+			wantName: "SELECT",
+		},
+		{
+			name:     "query with full SQL",
+			opts:     []Option{WithFullSQLInSpanName()},
+			drive:    query,
+			wantName: sql,
+		},
+		{
+			name:     "query with prefix",
+			opts:     []Option{WithQuerySpanNamePrefix()},
+			drive:    query,
+			wantName: "query SELECT",
+		},
+		{
+			name:     "prepare with prefix",
+			opts:     []Option{WithQuerySpanNamePrefix()},
+			drive:    prepare,
+			wantName: "prepare SELECT",
+		},
+		{
+			name:     "batch query with prefix",
+			opts:     []Option{WithQuerySpanNamePrefix()},
+			drive:    batch,
+			wantName: "batch query SELECT",
+		},
+		{
+			// Full SQL plus the prefix reproduces the pre-compliance default
+			// behavior exactly; this is the documented migration path.
+			name:     "full SQL with prefix matches legacy default",
+			opts:     []Option{WithFullSQLInSpanName(), WithQuerySpanNamePrefix()},
+			drive:    query,
+			wantName: "query " + sql,
+		},
+		{
+			// A custom span name function now drives the span name by default,
+			// not just the db.operation.name attribute.
+			name: "custom span name func drives the name",
+			opts: []Option{WithSpanNameCtxFunc(func(context.Context, string) string {
+				return "custom"
+			})},
+			drive:    query,
+			wantName: "custom",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			exporter := tracetest.NewInMemoryExporter()
+			tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+			t.Cleanup(func() { require.NoError(t, tp.Shutdown(context.Background())) })
+
+			opts := append([]Option{WithTracerProvider(tp)}, tt.opts...)
+			tracer := NewTracer(opts...)
+
+			ctx, parentSpan := tp.Tracer("test").Start(context.Background(), "parent")
+			tt.drive(ctx, tracer, conn)
+			parentSpan.End()
+
+			spans := exporter.GetSpans()
+			require.Greater(t, len(spans), 0, "no spans recorded")
+
+			assert.Equal(t, tt.wantName, spans[0].Name)
+		})
+	}
+}

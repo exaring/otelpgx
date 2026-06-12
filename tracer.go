@@ -75,7 +75,7 @@ type Tracer struct {
 	operationDuration dbconv.ClientOperationDuration
 	operationErrors   metric.Int64Counter
 
-	trimQuerySpanName    bool
+	fullQuerySpanName    bool
 	spanNameCtxFunc      SpanNameCtxFunc
 	prefixQuerySpanName  bool
 	logSQLStatement      bool
@@ -91,7 +91,7 @@ type tracerConfig struct {
 	tracerAttrs []attribute.KeyValue
 	meterAttrs  []attribute.KeyValue
 
-	trimQuerySpanName    bool
+	fullQuerySpanName    bool
 	spanNameCtxFunc      SpanNameCtxFunc
 	prefixQuerySpanName  bool
 	logSQLStatement      bool
@@ -111,9 +111,9 @@ func NewTracer(opts ...Option) *Tracer {
 		meterAttrs: []attribute.KeyValue{
 			semconv.DBSystemNamePostgreSQL,
 		},
-		trimQuerySpanName:    false,
+		fullQuerySpanName:    false,
 		spanNameCtxFunc:      defaultSpanNameCtxFunc,
-		prefixQuerySpanName:  true,
+		prefixQuerySpanName:  false,
 		logSQLStatement:      true,
 		logConnectionDetails: true,
 		includeParams:        false,
@@ -141,7 +141,7 @@ func NewTracer(opts ...Option) *Tracer {
 		},
 		tracerAttrs:          cfg.tracerAttrs,
 		meterAttrs:           cfg.meterAttrs,
-		trimQuerySpanName:    cfg.trimQuerySpanName,
+		fullQuerySpanName:    cfg.fullQuerySpanName,
 		spanNameCtxFunc:      cfg.spanNameCtxFunc,
 		prefixQuerySpanName:  cfg.prefixQuerySpanName,
 		logSQLStatement:      cfg.logSQLStatement,
@@ -262,10 +262,12 @@ func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 		attrs = append(attrs, connectionAttributesFromConfig(conn.Config())...)
 	}
 
+	operationName := t.spanNameCtxFunc(ctx, data.SQL)
+
 	if t.logSQLStatement {
 		attrs = append(attrs,
 			semconv.DBQueryText(data.SQL),
-			semconv.DBOperationName(t.spanNameCtxFunc(ctx, data.SQL)),
+			semconv.DBOperationName(operationName),
 		)
 
 		if t.includeParams {
@@ -278,18 +280,31 @@ func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 		trace.WithAttributes(attrs...),
 	)
 
-	spanName := data.SQL
-	if t.trimQuerySpanName {
-		spanName = t.spanNameCtxFunc(ctx, data.SQL)
-	}
-
-	if t.prefixQuerySpanName {
-		spanName = "query " + spanName
-	}
+	spanName := t.spanName(data.SQL, operationName, "query ")
 
 	ctx, _ = t.tracer.Start(ctx, spanName, opts...)
 
 	return ctx
+}
+
+// spanName builds the span name following the OpenTelemetry database span
+// conventions: the low-cardinality operation name (operationName, e.g.
+// "SELECT") by default, or the full SQL statement when WithFullSQLInSpanName is
+// set, optionally prefixed when WithQuerySpanNamePrefix is set.
+//
+// See https://opentelemetry.io/docs/specs/semconv/db/database-spans/ for the
+// span name guidance this follows.
+func (t *Tracer) spanName(sql, operationName, prefix string) string {
+	name := operationName
+	if t.fullQuerySpanName {
+		name = sql
+	}
+
+	if t.prefixQuerySpanName {
+		name = prefix + name
+	}
+
+	return name
 }
 
 // TraceQueryEnd is called at the end of Query, QueryRow, and Exec calls.
@@ -429,10 +444,12 @@ func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.T
 		attrs = append(attrs, connectionAttributesFromConfig(conn.Config())...)
 	}
 
+	operationName := t.spanNameCtxFunc(ctx, data.SQL)
+
 	if t.logSQLStatement {
 		attrs = append(attrs,
 			semconv.DBQueryText(data.SQL),
-			semconv.DBOperationName(t.spanNameCtxFunc(ctx, data.SQL)),
+			semconv.DBOperationName(operationName),
 		)
 
 		if t.includeParams {
@@ -445,18 +462,7 @@ func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.T
 		trace.WithAttributes(attrs...),
 	)
 
-	var spanName string
-	if t.trimQuerySpanName {
-		spanName = t.spanNameCtxFunc(ctx, data.SQL)
-		if t.prefixQuerySpanName {
-			spanName = "query " + spanName
-		}
-	} else {
-		spanName = data.SQL
-		if t.prefixQuerySpanName {
-			spanName = "batch query " + spanName
-		}
-	}
+	spanName := t.spanName(data.SQL, operationName, "batch query ")
 
 	_, span := t.tracer.Start(ctx, spanName, opts...)
 	recordSpanError(span, data.Err)
@@ -556,7 +562,8 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 		attrs = append(attrs, connectionAttributesFromConfig(conn.Config())...)
 	}
 
-	attrs = append(attrs, semconv.DBOperationName(t.spanNameCtxFunc(ctx, data.SQL)))
+	operationName := t.spanNameCtxFunc(ctx, data.SQL)
+	attrs = append(attrs, semconv.DBOperationName(operationName))
 
 	if t.logSQLStatement {
 		attrs = append(attrs, semconv.DBQueryText(data.SQL))
@@ -567,13 +574,7 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 		trace.WithAttributes(attrs...),
 	)
 
-	spanName := data.SQL
-	if t.trimQuerySpanName {
-		spanName = t.spanNameCtxFunc(ctx, data.SQL)
-	}
-	if t.prefixQuerySpanName {
-		spanName = "prepare " + spanName
-	}
+	spanName := t.spanName(data.SQL, operationName, "prepare ")
 
 	ctx, _ = t.tracer.Start(ctx, spanName, opts...)
 
