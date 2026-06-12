@@ -62,12 +62,30 @@ func WithMeterAttributes(attrs ...attribute.KeyValue) Option {
 	})
 }
 
-// WithTrimSQLInSpanName will use the SQL statement's first word as the span
-// name. By default, the whole SQL statement is used as a span name, where
-// applicable.
+// Deprecated: This is now the default behavior; use [WithFullSQLInSpanName] to
+// opt back into the previous behavior of using the whole SQL statement.
+//
+// WithTrimSQLInSpanName uses the SQL statement's first word (the operation
+// name, e.g. "SELECT") as the span name.
 func WithTrimSQLInSpanName() Option {
 	return optionFunc(func(cfg *tracerConfig) {
-		cfg.trimQuerySpanName = true
+		cfg.fullQuerySpanName = false
+	})
+}
+
+// WithFullSQLInSpanName uses the whole SQL statement as the span name.
+//
+// This is generally discouraged: the OpenTelemetry database span conventions
+// recommend a low-cardinality span name, and redaction/masking rules are
+// typically applied to the db.query.text attribute rather than the span name,
+// so any sensitive data embedded in the statement can leak through the name.
+// By default, the low-cardinality operation name (e.g. "SELECT") is used
+// instead.
+//
+// See https://opentelemetry.io/docs/specs/semconv/db/database-spans/.
+func WithFullSQLInSpanName() Option {
+	return optionFunc(func(cfg *tracerConfig) {
+		cfg.fullQuerySpanName = true
 	})
 }
 
@@ -92,7 +110,9 @@ type SpanNameCtxFunc func(ctx context.Context, stmt string) string
 // a SQL statement. The function will be called with the SQL statement as a
 // parameter.
 //
-// By default, the whole SQL statement is used as a span name, where applicable.
+// By default, the low-cardinality operation name (e.g. "SELECT") is extracted
+// from the SQL statement and used as the span name. This function also
+// determines the value of the db.operation.name attribute.
 func WithSpanNameFunc(fn SpanNameFunc) Option {
 	return WithSpanNameCtxFunc(func(_ context.Context, stmt string) string {
 		return fn(stmt)
@@ -103,18 +123,32 @@ func WithSpanNameFunc(fn SpanNameFunc) Option {
 // for a SQL statement. The function will be called with the context.Context and
 // SQL statement as a parameter.
 //
-// By default, the whole SQL statement is used as a span name, where applicable.
+// By default, the low-cardinality operation name (e.g. "SELECT") is extracted
+// from the SQL statement and used as the span name. This function also
+// determines the value of the db.operation.name attribute.
 func WithSpanNameCtxFunc(fn SpanNameCtxFunc) Option {
 	return optionFunc(func(cfg *tracerConfig) {
 		cfg.spanNameCtxFunc = fn
 	})
 }
 
-// WithDisableQuerySpanNamePrefix will disable the default prefix for the span
-// name. By default, the span name is prefixed with "batch query" or "query".
+// Deprecated: Span names are no longer prefixed by default, so this is a no-op.
+// Use [WithQuerySpanNamePrefix] to opt back into the previous prefixing
+// behavior.
+//
+// WithDisableQuerySpanNamePrefix disables the prefix for the span name.
 func WithDisableQuerySpanNamePrefix() Option {
 	return optionFunc(func(cfg *tracerConfig) {
 		cfg.prefixQuerySpanName = false
+	})
+}
+
+// WithQuerySpanNamePrefix prefixes the span name with the operation kind, i.e.
+// "query ", "prepare " or "batch query ". By default no prefix is added so that
+// span names follow the OpenTelemetry database span conventions.
+func WithQuerySpanNamePrefix() Option {
+	return optionFunc(func(cfg *tracerConfig) {
+		cfg.prefixQuerySpanName = true
 	})
 }
 
