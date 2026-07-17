@@ -168,11 +168,20 @@ func WithDisableSQLStatementInAttributes() Option {
 	})
 }
 
+// QueryParametersFilterFunc is a predicate that controls whether query parameters are recorded
+// for a given SQL statement. Return true to record parameters, false to omit them.
+type QueryParametersFilterFunc func(sql string) bool
+
 // WithIncludeQueryParameters includes the SQL query parameters in the span attribute with key pgx.query.parameters.
 // This is implicitly disabled if WithDisableSQLStatementInAttributes is used.
-func WithIncludeQueryParameters() Option {
+//
+// An optional filter can be provided to omit parameters for specific queries.
+func WithIncludeQueryParameters(filter ...QueryParametersFilterFunc) Option {
 	return optionFunc(func(cfg *tracerConfig) {
 		cfg.includeParams = true
+		if len(filter) > 0 {
+			cfg.queryParamsFilter = filter[0]
+		}
 	})
 }
 
