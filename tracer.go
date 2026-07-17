@@ -81,6 +81,7 @@ type Tracer struct {
 	logSQLStatement      bool
 	logConnectionDetails bool
 	includeParams        bool
+	queryParamsFilter    QueryParametersFilterFunc
 	disableAcquireTracer bool
 }
 
@@ -97,6 +98,7 @@ type tracerConfig struct {
 	logSQLStatement      bool
 	logConnectionDetails bool
 	includeParams        bool
+	queryParamsFilter    QueryParametersFilterFunc
 	disableAcquireTracer bool
 }
 
@@ -147,6 +149,7 @@ func NewTracer(opts ...Option) *Tracer {
 		logSQLStatement:      cfg.logSQLStatement,
 		logConnectionDetails: cfg.logConnectionDetails,
 		includeParams:        cfg.includeParams,
+		queryParamsFilter:    cfg.queryParamsFilter,
 		disableAcquireTracer: cfg.disableAcquireTracer,
 	}
 
@@ -275,7 +278,7 @@ func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 			semconv.DBOperationName(operationName),
 		)
 
-		if t.includeParams {
+		if t.includeParams && t.shouldRecordParams(data.SQL) {
 			attrs = append(attrs, makeParamsAttribute(data.Args))
 		}
 	}
@@ -457,7 +460,7 @@ func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.T
 			semconv.DBOperationName(operationName),
 		)
 
-		if t.includeParams {
+		if t.includeParams && t.shouldRecordParams(data.SQL) {
 			attrs = append(attrs, makeParamsAttribute(data.Args))
 		}
 	}
@@ -656,6 +659,13 @@ func (t *Tracer) TraceAcquireEnd(ctx context.Context, _ *pgxpool.Pool, data pgxp
 
 	recordSpanError(span, data.Err)
 	span.End()
+}
+
+func (t *Tracer) shouldRecordParams(sql string) bool {
+	if t.queryParamsFilter == nil {
+		return true
+	}
+	return t.queryParamsFilter(sql)
 }
 
 func makeParamsAttribute(args []any) attribute.KeyValue {

@@ -349,6 +349,39 @@ func TestTracer_spanAttributes(t *testing.T) {
 				"server.port": 5432,
 			},
 		},
+		{
+			name: "query with parameters included, filter allows",
+			opts: []Option{WithIncludeQueryParameters(func(sql string) bool {
+				return !strings.Contains(sql, "payments")
+			})},
+			drive: func(ctx context.Context, tracer *Tracer, conn *pgx.Conn) {
+				ctx = tracer.TraceQueryStart(ctx, conn, pgx.TraceQueryStartData{
+					SQL:  "SELECT * FROM users WHERE id = $1",
+					Args: []any{42},
+				})
+				tracer.TraceQueryEnd(ctx, conn, pgx.TraceQueryEndData{})
+			},
+			wantStrAttrs: map[string]string{
+				"db.query.text": "SELECT * FROM users WHERE id = $1",
+			},
+		},
+		{
+			name: "query with parameters included, filter blocks",
+			opts: []Option{WithIncludeQueryParameters(func(sql string) bool {
+				return !strings.Contains(sql, "payments")
+			})},
+			drive: func(ctx context.Context, tracer *Tracer, conn *pgx.Conn) {
+				ctx = tracer.TraceQueryStart(ctx, conn, pgx.TraceQueryStartData{
+					SQL:  "SELECT * FROM payments WHERE id = $1",
+					Args: []any{42},
+				})
+				tracer.TraceQueryEnd(ctx, conn, pgx.TraceQueryEndData{})
+			},
+			wantStrAttrs: map[string]string{
+				"db.query.text": "SELECT * FROM payments WHERE id = $1",
+			},
+			absentAttrs: []string{"pgx.query.parameters"},
+		},
 	}
 
 	for _, tt := range tests {
