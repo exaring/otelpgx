@@ -82,7 +82,9 @@ func TestRecordStats_UserAttrsOverrideLibraryDefaults(t *testing.T) {
 
 // dataPointAttributes returns the attribute set attached to every data point
 // in the given aggregation, across the metric shapes that recordStats emits
-// (Sum[int64] for counters/up-down counters, Gauge[int64] for the max gauge).
+// (Sum[int64] for counters/up-down counters, Gauge[int64] for the max gauge)
+// and the shape Tracer's db.client.operation.duration histogram emits
+// (Histogram[float64]).
 func dataPointAttributes(data metricdata.Aggregation) []attribute.Set {
 	var sets []attribute.Set
 	switch d := data.(type) {
@@ -91,6 +93,10 @@ func dataPointAttributes(data metricdata.Aggregation) []attribute.Set {
 			sets = append(sets, dp.Attributes)
 		}
 	case metricdata.Gauge[int64]:
+		for _, dp := range d.DataPoints {
+			sets = append(sets, dp.Attributes)
+		}
+	case metricdata.Histogram[float64]:
 		for _, dp := range d.DataPoints {
 			sets = append(sets, dp.Attributes)
 		}
