@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func BenchmarkDefaultSpanNameCtxFunc(b *testing.B) {
+func BenchmarkSQLOperationName(b *testing.B) {
 	benchmarks := []struct {
 		name  string
 		query string
@@ -28,7 +28,7 @@ func BenchmarkDefaultSpanNameCtxFunc(b *testing.B) {
 		b.Run(bm.name, func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
-				_ = defaultSpanNameCtxFunc(ctx, bm.query)
+				_ = SQLOperationName(ctx, bm.query)
 			}
 		})
 	}
