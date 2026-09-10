@@ -45,13 +45,3 @@ if err := otelpgx.RecordStats(conn); err != nil {
 ```
 
 See [options.go](options.go) for the full list of options.
-
-## Metrics
-
-`db.client.operation.duration` and `db.client.operation.errors` include a
-`db.operation.name` attribute (e.g. `SELECT`/`INSERT`/`UPDATE`/`DELETE`) for
-query, prepare, and per-statement batch-query calls, per the
-[OpenTelemetry database metrics semantic conventions](https://opentelemetry.io/docs/specs/semconv/database/database-metrics/).
-The aggregate duration/error recorded for a whole `SendBatch` call has no
-`db.operation.name`, since a batch may mix operation types and so has no
-single name that describes it as a whole.

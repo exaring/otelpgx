@@ -57,14 +57,11 @@ const (
 
 type startTimeCtxKey struct{}
 
-type operationNameCtxKey struct{}
-
-// metricAttrKey identifies a cached, per-call metric attribute.Set: the pgx
-// operation kind plus the SQL operation name (e.g. "SELECT") attached to it.
-type metricAttrKey struct {
-	operation     string
-	operationName string
-}
+// metricOperationNameCtxKey carries the db.operation.name value computed by
+// WithMetricOperationName's OperationNameFunc from a Trace*Start call to its
+// corresponding Trace*End call, for pgx operations where Start and End are
+// separate calls (query, prepare).
+type metricOperationNameCtxKey struct{}
 
 var _ pgxpool.AcquireTracer = (*Tracer)(nil)
 
@@ -81,23 +78,18 @@ type Tracer struct {
 	attributeSlicePool   sync.Pool
 	metricAttrs          map[string]attribute.Set
 
-	// operationNameAttrs lazily caches attribute.Set values that additionally
-	// carry db.operation.name, keyed by metricAttrKey. SQL operation names are
-	// a small, bounded vocabulary (SELECT/INSERT/UPDATE/…), so this cache
-	// stays small for the lifetime of the Tracer.
-	operationNameAttrs sync.Map
-
 	operationDuration dbconv.ClientOperationDuration
 	operationErrors   metric.Int64Counter
 
-	fullQuerySpanName    bool
-	spanNameCtxFunc      SpanNameCtxFunc
-	prefixQuerySpanName  bool
-	logSQLStatement      bool
-	logConnectionDetails bool
-	includeParams        bool
-	queryParamsFilter    QueryParametersFilterFunc
-	disableAcquireTracer bool
+	fullQuerySpanName       bool
+	spanNameCtxFunc         SpanNameCtxFunc
+	prefixQuerySpanName     bool
+	logSQLStatement         bool
+	logConnectionDetails    bool
+	includeParams           bool
+	queryParamsFilter       QueryParametersFilterFunc
+	disableAcquireTracer    bool
+	metricOperationNameFunc OperationNameFunc
 }
 
 type tracerConfig struct {
@@ -107,14 +99,15 @@ type tracerConfig struct {
 	tracerAttrs []attribute.KeyValue
 	meterAttrs  []attribute.KeyValue
 
-	fullQuerySpanName    bool
-	spanNameCtxFunc      SpanNameCtxFunc
-	prefixQuerySpanName  bool
-	logSQLStatement      bool
-	logConnectionDetails bool
-	includeParams        bool
-	queryParamsFilter    QueryParametersFilterFunc
-	disableAcquireTracer bool
+	fullQuerySpanName       bool
+	spanNameCtxFunc         SpanNameCtxFunc
+	prefixQuerySpanName     bool
+	logSQLStatement         bool
+	logConnectionDetails    bool
+	includeParams           bool
+	queryParamsFilter       QueryParametersFilterFunc
+	disableAcquireTracer    bool
+	metricOperationNameFunc OperationNameFunc
 }
 
 // NewTracer returns a new Tracer.
@@ -129,7 +122,7 @@ func NewTracer(opts ...Option) *Tracer {
 			semconv.DBSystemNamePostgreSQL,
 		},
 		fullQuerySpanName:    false,
-		spanNameCtxFunc:      defaultSpanNameCtxFunc,
+		spanNameCtxFunc:      SQLOperationName,
 		prefixQuerySpanName:  false,
 		logSQLStatement:      true,
 		logConnectionDetails: true,
@@ -156,16 +149,17 @@ func NewTracer(opts ...Option) *Tracer {
 				return &s
 			},
 		},
-		tracerAttrs:          cfg.tracerAttrs,
-		meterAttrs:           cfg.meterAttrs,
-		fullQuerySpanName:    cfg.fullQuerySpanName,
-		spanNameCtxFunc:      cfg.spanNameCtxFunc,
-		prefixQuerySpanName:  cfg.prefixQuerySpanName,
-		logSQLStatement:      cfg.logSQLStatement,
-		logConnectionDetails: cfg.logConnectionDetails,
-		includeParams:        cfg.includeParams,
-		queryParamsFilter:    cfg.queryParamsFilter,
-		disableAcquireTracer: cfg.disableAcquireTracer,
+		tracerAttrs:             cfg.tracerAttrs,
+		meterAttrs:              cfg.meterAttrs,
+		fullQuerySpanName:       cfg.fullQuerySpanName,
+		spanNameCtxFunc:         cfg.spanNameCtxFunc,
+		prefixQuerySpanName:     cfg.prefixQuerySpanName,
+		logSQLStatement:         cfg.logSQLStatement,
+		logConnectionDetails:    cfg.logConnectionDetails,
+		includeParams:           cfg.includeParams,
+		queryParamsFilter:       cfg.queryParamsFilter,
+		disableAcquireTracer:    cfg.disableAcquireTracer,
+		metricOperationNameFunc: cfg.metricOperationNameFunc,
 	}
 
 	tracer.createMetrics()
@@ -255,30 +249,28 @@ func (t *Tracer) recordOperationDuration(ctx context.Context, pgxOperation, oper
 }
 
 // attributeSetFor returns the attribute.Set to record metrics against for a
-// given pgx operation kind. When operationName is non-empty, the returned set
-// additionally carries db.operation.name, per the OpenTelemetry database
-// metrics conventions (https://opentelemetry.io/docs/specs/semconv/database/database-metrics/),
+// given pgx operation kind. When operationName is non-empty (only possible
+// when WithMetricOperationName is set), the returned set additionally carries
+// db.operation.name, per the OpenTelemetry database metrics conventions
+// (https://opentelemetry.io/docs/specs/semconv/database/database-metrics/),
 // conditionally required "if readily available and if there is a single
-// operation name that describes the database call". Such sets are cached
-// since the (kind, operation name) space is small and bounded.
+// operation name that describes the database call".
+//
+// This isn't cached: benchmarking showed building a fresh attribute.Set costs
+// ~150ns/3 allocs versus a cached lookup, which is immaterial next to a
+// database round trip, and a cache keyed on operationName could grow
+// unboundedly large for a caller-supplied OperationNameFunc with
+// high-cardinality output.
 func (t *Tracer) attributeSetFor(pgxOperation, operationName string) attribute.Set {
 	if operationName == "" {
 		return t.metricAttrs[pgxOperation]
-	}
-
-	key := metricAttrKey{operation: pgxOperation, operationName: operationName}
-	if cached, ok := t.operationNameAttrs.Load(key); ok {
-		return cached.(attribute.Set)
 	}
 
 	attrs := append(append([]attribute.KeyValue{}, t.meterAttrs...),
 		PGXOperationTypeKey.String(pgxOperation),
 		t.operationDuration.AttrOperationName(operationName),
 	)
-	set := attribute.NewSet(attrs...)
-
-	actual, _ := t.operationNameAttrs.LoadOrStore(key, set)
-	return actual.(attribute.Set)
+	return attribute.NewSet(attrs...)
 }
 
 // connectionAttributesFromConfig returns a SpanStartOption that contains
@@ -301,11 +293,13 @@ func connectionAttributesFromConfig(config *pgx.ConnConfig) []attribute.KeyValue
 func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
 	ctx = context.WithValue(ctx, startTimeCtxKey{}, time.Now())
 
-	// Computed unconditionally (and stashed on the context for TraceQueryEnd)
-	// since db.client.operation.duration/errors are recorded regardless of
-	// trace sampling.
-	operationName := t.spanNameCtxFunc(ctx, data.SQL)
-	ctx = context.WithValue(ctx, operationNameCtxKey{}, operationName)
+	// Only computed (and stashed on the context for TraceQueryEnd) when
+	// WithMetricOperationName is set: db.client.operation.duration/errors are
+	// recorded regardless of trace sampling, so unlike the span-naming hooks
+	// below, this runs unconditionally once enabled.
+	if t.metricOperationNameFunc != nil {
+		ctx = context.WithValue(ctx, metricOperationNameCtxKey{}, t.metricOperationNameFunc(ctx, data.SQL))
+	}
 
 	if !trace.SpanFromContext(ctx).IsRecording() {
 		return ctx
@@ -325,6 +319,8 @@ func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 	if t.logConnectionDetails && conn != nil {
 		attrs = append(attrs, connectionAttributesFromConfig(conn.Config())...)
 	}
+
+	operationName := t.spanNameCtxFunc(ctx, data.SQL)
 
 	if t.logSQLStatement {
 		attrs = append(attrs,
@@ -372,7 +368,7 @@ func (t *Tracer) spanName(sql, operationName, prefix string) string {
 // TraceQueryEnd is called at the end of Query, QueryRow, and Exec calls.
 func (t *Tracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
 	span := trace.SpanFromContext(ctx)
-	operationName, _ := ctx.Value(operationNameCtxKey{}).(string)
+	operationName, _ := ctx.Value(metricOperationNameCtxKey{}).(string)
 	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationQuery, operationName)
 	t.recordOperationDuration(ctx, pgxOperationQuery, operationName)
 
@@ -488,8 +484,12 @@ func (t *Tracer) TraceBatchStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.TraceBatchQueryData) {
 	// Each call describes exactly one statement in the batch, so — unlike the
 	// aggregate TraceBatchEnd — a single operation name always applies here.
-	operationName := t.spanNameCtxFunc(ctx, data.SQL)
-	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationBatch, operationName)
+	// Only computed when WithMetricOperationName is set.
+	var metricOperationName string
+	if t.metricOperationNameFunc != nil {
+		metricOperationName = t.metricOperationNameFunc(ctx, data.SQL)
+	}
+	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationBatch, metricOperationName)
 
 	if !trace.SpanFromContext(ctx).IsRecording() {
 		return
@@ -509,6 +509,8 @@ func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.T
 	if t.logConnectionDetails && conn != nil {
 		attrs = append(attrs, connectionAttributesFromConfig(conn.Config())...)
 	}
+
+	operationName := t.spanNameCtxFunc(ctx, data.SQL)
 
 	if t.logSQLStatement {
 		attrs = append(attrs,
@@ -607,11 +609,13 @@ func (t *Tracer) TraceConnectEnd(ctx context.Context, data pgx.TraceConnectEndDa
 func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx.TracePrepareStartData) context.Context {
 	ctx = context.WithValue(ctx, startTimeCtxKey{}, time.Now())
 
-	// Computed unconditionally (and stashed on the context for
-	// TracePrepareEnd) since db.client.operation.duration/errors are recorded
-	// regardless of trace sampling.
-	operationName := t.spanNameCtxFunc(ctx, data.SQL)
-	ctx = context.WithValue(ctx, operationNameCtxKey{}, operationName)
+	// Only computed (and stashed on the context for TracePrepareEnd) when
+	// WithMetricOperationName is set: db.client.operation.duration/errors are
+	// recorded regardless of trace sampling, so unlike the span-naming hooks
+	// below, this runs unconditionally once enabled.
+	if t.metricOperationNameFunc != nil {
+		ctx = context.WithValue(ctx, metricOperationNameCtxKey{}, t.metricOperationNameFunc(ctx, data.SQL))
+	}
 
 	if !trace.SpanFromContext(ctx).IsRecording() {
 		return ctx
@@ -636,6 +640,7 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 		attrs = append(attrs, connectionAttributesFromConfig(conn.Config())...)
 	}
 
+	operationName := t.spanNameCtxFunc(ctx, data.SQL)
 	attrs = append(attrs, semconv.DBOperationName(operationName))
 
 	if t.logSQLStatement {
@@ -657,7 +662,7 @@ func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 // TracePrepareEnd is called at the end of Prepare calls.
 func (t *Tracer) TracePrepareEnd(ctx context.Context, _ *pgx.Conn, data pgx.TracePrepareEndData) {
 	span := trace.SpanFromContext(ctx)
-	operationName, _ := ctx.Value(operationNameCtxKey{}).(string)
+	operationName, _ := ctx.Value(metricOperationNameCtxKey{}).(string)
 	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationPrepare, operationName)
 	t.recordOperationDuration(ctx, pgxOperationPrepare, operationName)
 

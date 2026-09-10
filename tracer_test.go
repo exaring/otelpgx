@@ -529,11 +529,13 @@ func TestTracer_spanName(t *testing.T) {
 	}
 }
 
-// TestTracer_metricOperationName asserts that db.client.operation.duration
-// and db.client.operation.errors carry db.operation.name for query, prepare,
-// and per-statement batch-query calls, and that the whole-batch aggregate
-// recorded in TraceBatchEnd does not (a batch can mix operation types, so
-// there's no single name that describes it).
+// TestTracer_metricOperationName asserts that, once WithMetricOperationName
+// is set, db.client.operation.duration and db.client.operation.errors carry
+// db.operation.name for query, prepare, and per-statement batch-query calls,
+// that the whole-batch aggregate recorded in TraceBatchEnd does not (a batch
+// can mix operation types, so there's no single name that describes it), and
+// that the attribute is absent entirely when the option isn't set (the
+// default).
 //
 // Every case uses a noop TracerProvider so no span is ever recording,
 // demonstrating that metric recording — and this attribute along with it —
@@ -543,8 +545,9 @@ func TestTracer_metricOperationName(t *testing.T) {
 	boom := errors.New("boom")
 
 	tests := []struct {
-		name  string
-		drive func(ctx context.Context, tracer *Tracer, conn *pgx.Conn)
+		name       string
+		tracerOpts []Option
+		drive      func(ctx context.Context, tracer *Tracer, conn *pgx.Conn)
 		// metric is the instrument to inspect; wantOperationName is the
 		// expected db.operation.name value on one of its data points, or ""
 		// to assert the attribute is absent from all of its data points.
@@ -552,7 +555,18 @@ func TestTracer_metricOperationName(t *testing.T) {
 		wantOperationName string
 	}{
 		{
-			name: "select query duration carries the operation name",
+			name:       "not attached by default",
+			tracerOpts: nil,
+			drive: func(ctx context.Context, tracer *Tracer, conn *pgx.Conn) {
+				ctx = tracer.TraceQueryStart(ctx, conn, pgx.TraceQueryStartData{SQL: "SELECT * FROM users"})
+				tracer.TraceQueryEnd(ctx, conn, pgx.TraceQueryEndData{})
+			},
+			metric:            "db.client.operation.duration",
+			wantOperationName: "",
+		},
+		{
+			name:       "select query duration carries the operation name",
+			tracerOpts: []Option{WithMetricOperationName(SQLOperationName)},
 			drive: func(ctx context.Context, tracer *Tracer, conn *pgx.Conn) {
 				ctx = tracer.TraceQueryStart(ctx, conn, pgx.TraceQueryStartData{SQL: "SELECT * FROM users"})
 				tracer.TraceQueryEnd(ctx, conn, pgx.TraceQueryEndData{})
@@ -561,7 +575,8 @@ func TestTracer_metricOperationName(t *testing.T) {
 			wantOperationName: "SELECT",
 		},
 		{
-			name: "insert query duration carries the operation name",
+			name:       "insert query duration carries the operation name",
+			tracerOpts: []Option{WithMetricOperationName(SQLOperationName)},
 			drive: func(ctx context.Context, tracer *Tracer, conn *pgx.Conn) {
 				ctx = tracer.TraceQueryStart(ctx, conn, pgx.TraceQueryStartData{SQL: "INSERT INTO users (id) VALUES (1)"})
 				tracer.TraceQueryEnd(ctx, conn, pgx.TraceQueryEndData{})
@@ -570,7 +585,8 @@ func TestTracer_metricOperationName(t *testing.T) {
 			wantOperationName: "INSERT",
 		},
 		{
-			name: "delete query duration carries the operation name",
+			name:       "delete query duration carries the operation name",
+			tracerOpts: []Option{WithMetricOperationName(SQLOperationName)},
 			drive: func(ctx context.Context, tracer *Tracer, conn *pgx.Conn) {
 				ctx = tracer.TraceQueryStart(ctx, conn, pgx.TraceQueryStartData{SQL: "DELETE FROM users"})
 				tracer.TraceQueryEnd(ctx, conn, pgx.TraceQueryEndData{})
@@ -579,7 +595,8 @@ func TestTracer_metricOperationName(t *testing.T) {
 			wantOperationName: "DELETE",
 		},
 		{
-			name: "update query errors carries the operation name",
+			name:       "update query errors carries the operation name",
+			tracerOpts: []Option{WithMetricOperationName(SQLOperationName)},
 			drive: func(ctx context.Context, tracer *Tracer, conn *pgx.Conn) {
 				ctx = tracer.TraceQueryStart(ctx, conn, pgx.TraceQueryStartData{SQL: "UPDATE users SET name = $1"})
 				tracer.TraceQueryEnd(ctx, conn, pgx.TraceQueryEndData{Err: boom})
@@ -588,7 +605,8 @@ func TestTracer_metricOperationName(t *testing.T) {
 			wantOperationName: "UPDATE",
 		},
 		{
-			name: "prepare duration carries the operation name",
+			name:       "prepare duration carries the operation name",
+			tracerOpts: []Option{WithMetricOperationName(SQLOperationName)},
 			drive: func(ctx context.Context, tracer *Tracer, conn *pgx.Conn) {
 				ctx = tracer.TracePrepareStart(ctx, conn, pgx.TracePrepareStartData{Name: "stmt1", SQL: "SELECT 1"})
 				tracer.TracePrepareEnd(ctx, conn, pgx.TracePrepareEndData{})
@@ -597,7 +615,8 @@ func TestTracer_metricOperationName(t *testing.T) {
 			wantOperationName: "SELECT",
 		},
 		{
-			name: "batch query error carries its own operation name",
+			name:       "batch query error carries its own operation name",
+			tracerOpts: []Option{WithMetricOperationName(SQLOperationName)},
 			drive: func(ctx context.Context, tracer *Tracer, conn *pgx.Conn) {
 				tracer.TraceBatchQuery(ctx, conn, pgx.TraceBatchQueryData{
 					SQL: "INSERT INTO users (id) VALUES (1)",
@@ -608,7 +627,8 @@ func TestTracer_metricOperationName(t *testing.T) {
 			wantOperationName: "INSERT",
 		},
 		{
-			name: "batch aggregate duration has no operation name",
+			name:       "batch aggregate duration has no operation name",
+			tracerOpts: []Option{WithMetricOperationName(SQLOperationName)},
 			drive: func(ctx context.Context, tracer *Tracer, conn *pgx.Conn) {
 				ctx = tracer.TraceBatchStart(ctx, conn, pgx.TraceBatchStartData{})
 				tracer.TraceBatchQuery(ctx, conn, pgx.TraceBatchQueryData{SQL: "INSERT INTO users (id) VALUES (1)"})
@@ -618,6 +638,16 @@ func TestTracer_metricOperationName(t *testing.T) {
 			metric:            "db.client.operation.duration",
 			wantOperationName: "",
 		},
+		{
+			name:       "custom OperationNameFunc drives the value",
+			tracerOpts: []Option{WithMetricOperationName(func(context.Context, string) string { return "custom" })},
+			drive: func(ctx context.Context, tracer *Tracer, conn *pgx.Conn) {
+				ctx = tracer.TraceQueryStart(ctx, conn, pgx.TraceQueryStartData{SQL: "SELECT * FROM users"})
+				tracer.TraceQueryEnd(ctx, conn, pgx.TraceQueryEndData{})
+			},
+			metric:            "db.client.operation.duration",
+			wantOperationName: "custom",
+		},
 	}
 
 	for _, tt := range tests {
@@ -625,7 +655,8 @@ func TestTracer_metricOperationName(t *testing.T) {
 			reader := sdkmetric.NewManualReader()
 			provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 
-			tracer := NewTracer(WithMeterProvider(provider), WithTracerProvider(noop.NewTracerProvider()))
+			opts := append([]Option{WithMeterProvider(provider), WithTracerProvider(noop.NewTracerProvider())}, tt.tracerOpts...)
+			tracer := NewTracer(opts...)
 
 			ctx := context.Background()
 			tt.drive(ctx, tracer, conn)

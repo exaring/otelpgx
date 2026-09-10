@@ -185,6 +185,37 @@ func WithIncludeQueryParameters(filter ...QueryParametersFilterFunc) Option {
 	})
 }
 
+// OperationNameFunc returns the value for the db.operation.name attribute on
+// the db.client.operation.duration and db.client.operation.errors metrics,
+// given the SQL statement for a query, prepare, or batch-query call. Return
+// "" to omit the attribute for a particular call.
+type OperationNameFunc func(ctx context.Context, sql string) string
+
+// WithMetricOperationName enables the db.operation.name attribute on the
+// db.client.operation.duration and db.client.operation.errors metrics for
+// query, prepare, and per-statement batch-query calls, using fn to derive it
+// from each call's SQL statement. By default, no option is set and these
+// metrics carry no operation name.
+//
+// This is deliberately independent of the span-naming hooks
+// (WithSpanNameFunc/WithSpanNameCtxFunc): unlike span attributes, metric
+// attributes are recorded regardless of trace sampling, so once this option
+// is set, fn runs on every call, sampled or not. Pass [SQLOperationName] to
+// use the same low-cardinality parser the span path uses by default, e.g.
+// WithMetricOperationName(otelpgx.SQLOperationName), or supply a custom
+// function — bear in mind that a function returning high-cardinality values
+// will produce high-cardinality metrics.
+//
+// connect/acquire/copy calls have no SQL statement to derive a name from, so
+// fn is never called for them. The aggregate duration/error count recorded
+// for a whole batch (as opposed to each of its statements) also has no
+// single operation name to describe it, so fn is not called for that either.
+func WithMetricOperationName(fn OperationNameFunc) Option {
+	return optionFunc(func(cfg *tracerConfig) {
+		cfg.metricOperationNameFunc = fn
+	})
+}
+
 // StatsOption allows for managing RecordStats configuration using functional options.
 type StatsOption interface {
 	applyStatsOptions(o *statsOptions)
