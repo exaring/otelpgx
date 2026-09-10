@@ -2,6 +2,7 @@ package otelpgx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -12,8 +13,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/attribute"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 func TestTracer_sqlOperationName(t *testing.T) {
@@ -521,6 +525,156 @@ func TestTracer_spanName(t *testing.T) {
 			require.Greater(t, len(spans), 0, "no spans recorded")
 
 			assert.Equal(t, tt.wantName, spans[0].Name)
+		})
+	}
+}
+
+func TestTracer_metricOperationName(t *testing.T) {
+	conn := newMockConn(t, "fakehost", 5432, "fakeuser", "fakedb")
+	boom := errors.New("boom")
+
+	tests := []struct {
+		name       string
+		tracerOpts []Option
+		drive      func(ctx context.Context, tracer *Tracer, conn *pgx.Conn)
+		metric     string
+		// wantOperationName is "" to assert db.operation.name is absent.
+		wantOperationName string
+	}{
+		{
+			name:       "not attached by default",
+			tracerOpts: nil,
+			drive: func(ctx context.Context, tracer *Tracer, conn *pgx.Conn) {
+				ctx = tracer.TraceQueryStart(ctx, conn, pgx.TraceQueryStartData{SQL: "SELECT * FROM users"})
+				tracer.TraceQueryEnd(ctx, conn, pgx.TraceQueryEndData{})
+			},
+			metric:            "db.client.operation.duration",
+			wantOperationName: "",
+		},
+		{
+			name:       "select query duration carries the operation name",
+			tracerOpts: []Option{WithMetricOperationName(SQLOperationName)},
+			drive: func(ctx context.Context, tracer *Tracer, conn *pgx.Conn) {
+				ctx = tracer.TraceQueryStart(ctx, conn, pgx.TraceQueryStartData{SQL: "SELECT * FROM users"})
+				tracer.TraceQueryEnd(ctx, conn, pgx.TraceQueryEndData{})
+			},
+			metric:            "db.client.operation.duration",
+			wantOperationName: "SELECT",
+		},
+		{
+			name:       "insert query duration carries the operation name",
+			tracerOpts: []Option{WithMetricOperationName(SQLOperationName)},
+			drive: func(ctx context.Context, tracer *Tracer, conn *pgx.Conn) {
+				ctx = tracer.TraceQueryStart(ctx, conn, pgx.TraceQueryStartData{SQL: "INSERT INTO users (id) VALUES (1)"})
+				tracer.TraceQueryEnd(ctx, conn, pgx.TraceQueryEndData{})
+			},
+			metric:            "db.client.operation.duration",
+			wantOperationName: "INSERT",
+		},
+		{
+			name:       "delete query duration carries the operation name",
+			tracerOpts: []Option{WithMetricOperationName(SQLOperationName)},
+			drive: func(ctx context.Context, tracer *Tracer, conn *pgx.Conn) {
+				ctx = tracer.TraceQueryStart(ctx, conn, pgx.TraceQueryStartData{SQL: "DELETE FROM users"})
+				tracer.TraceQueryEnd(ctx, conn, pgx.TraceQueryEndData{})
+			},
+			metric:            "db.client.operation.duration",
+			wantOperationName: "DELETE",
+		},
+		{
+			name:       "update query errors carries the operation name",
+			tracerOpts: []Option{WithMetricOperationName(SQLOperationName)},
+			drive: func(ctx context.Context, tracer *Tracer, conn *pgx.Conn) {
+				ctx = tracer.TraceQueryStart(ctx, conn, pgx.TraceQueryStartData{SQL: "UPDATE users SET name = $1"})
+				tracer.TraceQueryEnd(ctx, conn, pgx.TraceQueryEndData{Err: boom})
+			},
+			metric:            "db.client.operation.errors",
+			wantOperationName: "UPDATE",
+		},
+		{
+			name:       "prepare duration carries the operation name",
+			tracerOpts: []Option{WithMetricOperationName(SQLOperationName)},
+			drive: func(ctx context.Context, tracer *Tracer, conn *pgx.Conn) {
+				ctx = tracer.TracePrepareStart(ctx, conn, pgx.TracePrepareStartData{Name: "stmt1", SQL: "SELECT 1"})
+				tracer.TracePrepareEnd(ctx, conn, pgx.TracePrepareEndData{})
+			},
+			metric:            "db.client.operation.duration",
+			wantOperationName: "SELECT",
+		},
+		{
+			name:       "batch query error carries its own operation name",
+			tracerOpts: []Option{WithMetricOperationName(SQLOperationName)},
+			drive: func(ctx context.Context, tracer *Tracer, conn *pgx.Conn) {
+				tracer.TraceBatchQuery(ctx, conn, pgx.TraceBatchQueryData{
+					SQL: "INSERT INTO users (id) VALUES (1)",
+					Err: boom,
+				})
+			},
+			metric:            "db.client.operation.errors",
+			wantOperationName: "INSERT",
+		},
+		{
+			name:       "batch aggregate duration has no operation name",
+			tracerOpts: []Option{WithMetricOperationName(SQLOperationName)},
+			drive: func(ctx context.Context, tracer *Tracer, conn *pgx.Conn) {
+				ctx = tracer.TraceBatchStart(ctx, conn, pgx.TraceBatchStartData{})
+				tracer.TraceBatchQuery(ctx, conn, pgx.TraceBatchQueryData{SQL: "INSERT INTO users (id) VALUES (1)"})
+				tracer.TraceBatchQuery(ctx, conn, pgx.TraceBatchQueryData{SQL: "UPDATE users SET name = $1"})
+				tracer.TraceBatchEnd(ctx, conn, pgx.TraceBatchEndData{})
+			},
+			metric:            "db.client.operation.duration",
+			wantOperationName: "",
+		},
+		{
+			name:       "custom OperationNameFunc drives the value",
+			tracerOpts: []Option{WithMetricOperationName(func(context.Context, string) string { return "custom" })},
+			drive: func(ctx context.Context, tracer *Tracer, conn *pgx.Conn) {
+				ctx = tracer.TraceQueryStart(ctx, conn, pgx.TraceQueryStartData{SQL: "SELECT * FROM users"})
+				tracer.TraceQueryEnd(ctx, conn, pgx.TraceQueryEndData{})
+			},
+			metric:            "db.client.operation.duration",
+			wantOperationName: "custom",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader := sdkmetric.NewManualReader()
+			provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+
+			opts := append([]Option{WithMeterProvider(provider), WithTracerProvider(noop.NewTracerProvider())}, tt.tracerOpts...)
+			tracer := NewTracer(opts...)
+
+			ctx := context.Background()
+			tt.drive(ctx, tracer, conn)
+
+			var rm metricdata.ResourceMetrics
+			require.NoError(t, reader.Collect(ctx, &rm))
+
+			var dataPoints int
+			var gotOperationName string
+			var gotOK bool
+			for _, sm := range rm.ScopeMetrics {
+				for _, m := range sm.Metrics {
+					if m.Name != tt.metric {
+						continue
+					}
+					for _, attrs := range dataPointAttributes(m.Data) {
+						dataPoints++
+						if v, ok := attrs.Value(attribute.Key("db.operation.name")); ok {
+							gotOperationName, gotOK = v.AsString(), true
+						}
+					}
+				}
+			}
+			require.Greaterf(t, dataPoints, 0, "metric %q produced no data points", tt.metric)
+
+			if tt.wantOperationName == "" {
+				require.Falsef(t, gotOK, "unexpected db.operation.name=%q on %s", gotOperationName, tt.metric)
+				return
+			}
+			require.Truef(t, gotOK, "missing db.operation.name on %s", tt.metric)
+			assert.Equal(t, tt.wantOperationName, gotOperationName)
 		})
 	}
 }
