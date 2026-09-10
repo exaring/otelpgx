@@ -529,17 +529,6 @@ func TestTracer_spanName(t *testing.T) {
 	}
 }
 
-// TestTracer_metricOperationName asserts that, once WithMetricOperationName
-// is set, db.client.operation.duration and db.client.operation.errors carry
-// db.operation.name for query, prepare, and per-statement batch-query calls,
-// that the whole-batch aggregate recorded in TraceBatchEnd does not (a batch
-// can mix operation types, so there's no single name that describes it), and
-// that the attribute is absent entirely when the option isn't set (the
-// default).
-//
-// Every case uses a noop TracerProvider so no span is ever recording,
-// demonstrating that metric recording — and this attribute along with it —
-// is decoupled from trace sampling.
 func TestTracer_metricOperationName(t *testing.T) {
 	conn := newMockConn(t, "fakehost", 5432, "fakeuser", "fakedb")
 	boom := errors.New("boom")
@@ -548,10 +537,8 @@ func TestTracer_metricOperationName(t *testing.T) {
 		name       string
 		tracerOpts []Option
 		drive      func(ctx context.Context, tracer *Tracer, conn *pgx.Conn)
-		// metric is the instrument to inspect; wantOperationName is the
-		// expected db.operation.name value on one of its data points, or ""
-		// to assert the attribute is absent from all of its data points.
-		metric            string
+		metric     string
+		// wantOperationName is "" to assert db.operation.name is absent.
 		wantOperationName string
 	}{
 		{
