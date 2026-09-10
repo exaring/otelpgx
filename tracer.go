@@ -57,10 +57,8 @@ const (
 
 type startTimeCtxKey struct{}
 
-// metricOperationNameCtxKey carries the db.operation.name value computed by
-// WithMetricOperationName's OperationNameFunc from a Trace*Start call to its
-// corresponding Trace*End call, for pgx operations where Start and End are
-// separate calls (query, prepare).
+// metricOperationNameCtxKey threads WithMetricOperationName's computed value
+// from Trace*Start to Trace*End (query, prepare).
 type metricOperationNameCtxKey struct{}
 
 var _ pgxpool.AcquireTracer = (*Tracer)(nil)
@@ -237,11 +235,8 @@ func (t *Tracer) incrementOperationErrorCount(ctx context.Context, err error, pg
 	}
 }
 
-// recordOperationDuration will compute and record the time since the start of an operation.
-//
-// operationName is the SQL operation name (e.g. "SELECT") to additionally
-// attach as db.operation.name, or "" when none applies to this call (e.g.
-// connect/acquire/copy, or the aggregate end of a batch).
+// recordOperationDuration will compute and record the time since the start of
+// an operation. See incrementOperationErrorCount for the operationName parameter.
 func (t *Tracer) recordOperationDuration(ctx context.Context, pgxOperation, operationName string) {
 	if startTime, ok := ctx.Value(startTimeCtxKey{}).(time.Time); ok {
 		t.operationDuration.RecordSet(ctx, time.Since(startTime).Seconds(), t.attributeSetFor(pgxOperation, operationName))
@@ -249,18 +244,12 @@ func (t *Tracer) recordOperationDuration(ctx context.Context, pgxOperation, oper
 }
 
 // attributeSetFor returns the attribute.Set to record metrics against for a
-// given pgx operation kind. When operationName is non-empty (only possible
-// when WithMetricOperationName is set), the returned set additionally carries
-// db.operation.name, per the OpenTelemetry database metrics conventions
-// (https://opentelemetry.io/docs/specs/semconv/database/database-metrics/),
-// conditionally required "if readily available and if there is a single
-// operation name that describes the database call".
-//
-// This isn't cached: benchmarking showed building a fresh attribute.Set costs
-// ~150ns/3 allocs versus a cached lookup, which is immaterial next to a
-// database round trip, and a cache keyed on operationName could grow
-// unboundedly large for a caller-supplied OperationNameFunc with
-// high-cardinality output.
+// given pgx operation kind, additionally carrying db.operation.name when
+// operationName is non-empty. This isn't cached: benchmarking showed building
+// a fresh attribute.Set costs ~150ns/3 allocs versus a cached lookup, which is
+// immaterial next to a database round trip, and a cache keyed on
+// operationName could grow unboundedly large for a caller-supplied
+// OperationNameFunc with high-cardinality output.
 func (t *Tracer) attributeSetFor(pgxOperation, operationName string) attribute.Set {
 	if operationName == "" {
 		return t.metricAttrs[pgxOperation]
@@ -293,10 +282,7 @@ func connectionAttributesFromConfig(config *pgx.ConnConfig) []attribute.KeyValue
 func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
 	ctx = context.WithValue(ctx, startTimeCtxKey{}, time.Now())
 
-	// Only computed (and stashed on the context for TraceQueryEnd) when
-	// WithMetricOperationName is set: db.client.operation.duration/errors are
-	// recorded regardless of trace sampling, so unlike the span-naming hooks
-	// below, this runs unconditionally once enabled.
+	// Runs regardless of trace sampling, unlike the span-naming hooks below.
 	if t.metricOperationNameFunc != nil {
 		ctx = context.WithValue(ctx, metricOperationNameCtxKey{}, t.metricOperationNameFunc(ctx, data.SQL))
 	}
@@ -482,9 +468,8 @@ func (t *Tracer) TraceBatchStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 
 // TraceBatchQuery is called at the after each query in a batch.
 func (t *Tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.TraceBatchQueryData) {
-	// Each call describes exactly one statement in the batch, so — unlike the
-	// aggregate TraceBatchEnd — a single operation name always applies here.
-	// Only computed when WithMetricOperationName is set.
+	// Unlike the aggregate TraceBatchEnd, each call here describes exactly one
+	// statement, so a single operation name always applies.
 	var metricOperationName string
 	if t.metricOperationNameFunc != nil {
 		metricOperationName = t.metricOperationNameFunc(ctx, data.SQL)
@@ -609,10 +594,7 @@ func (t *Tracer) TraceConnectEnd(ctx context.Context, data pgx.TraceConnectEndDa
 func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx.TracePrepareStartData) context.Context {
 	ctx = context.WithValue(ctx, startTimeCtxKey{}, time.Now())
 
-	// Only computed (and stashed on the context for TracePrepareEnd) when
-	// WithMetricOperationName is set: db.client.operation.duration/errors are
-	// recorded regardless of trace sampling, so unlike the span-naming hooks
-	// below, this runs unconditionally once enabled.
+	// Runs regardless of trace sampling, unlike the span-naming hooks below.
 	if t.metricOperationNameFunc != nil {
 		ctx = context.WithValue(ctx, metricOperationNameCtxKey{}, t.metricOperationNameFunc(ctx, data.SQL))
 	}
