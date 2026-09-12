@@ -1,6 +1,3 @@
-//go:build go1.24
-// +build go1.24
-
 package otelpgx_test
 
 import (
