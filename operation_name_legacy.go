@@ -10,9 +10,9 @@ import (
 )
 
 // defaultSpanNameCtxFunc attempts to get the first 'word' from a given SQL query, which usually
-// is the operation name (e.g. 'SELECT').
+// is the operation name (e.g. 'SELECT'). Leading SQL comments are skipped.
 func defaultSpanNameCtxFunc(_ context.Context, stmt string) string {
-	stmt = strings.TrimSpace(stmt)
+	stmt = skipLeadingComments(stmt)
 	end := strings.IndexFunc(stmt, unicode.IsSpace)
 	if end < 0 && len(stmt) > 0 {
 		// No space found, use the whole statement.

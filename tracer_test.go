@@ -60,6 +60,42 @@ func TestTracer_sqlOperationName(t *testing.T) {
 			expName: sqlOperationUnknown,
 		},
 		{
+			name:    "Leading line comment (sqlc style)",
+			query:   "-- name: GetUsers :many\nSELECT * FROM users",
+			tracer:  NewTracer(),
+			expName: "SELECT",
+		},
+		{
+			name:    "Leading block comment",
+			query:   "/* name: GetBooks :many */\nSELECT * FROM books",
+			tracer:  NewTracer(),
+			expName: "SELECT",
+		},
+		{
+			name:    "Multiple leading comments",
+			query:   "-- first\n  /* second\n spans lines */\n-- third\n\tDELETE FROM users",
+			tracer:  NewTracer(),
+			expName: "DELETE",
+		},
+		{
+			name:    "Comment-only query",
+			query:   "-- nothing here",
+			tracer:  NewTracer(),
+			expName: sqlOperationUnknown,
+		},
+		{
+			name:    "Unterminated block comment",
+			query:   "/* never closed SELECT 1",
+			tracer:  NewTracer(),
+			expName: sqlOperationUnknown,
+		},
+		{
+			name:    "Trailing comment is kept",
+			query:   "SELECT 1 -- trailing",
+			tracer:  NewTracer(),
+			expName: "SELECT",
+		},
+		{
 			name:    "Functional span name (-- comment style)",
 			query:   "-- name: GetUsers :many\nSELECT * FROM users",
 			tracer:  NewTracer(WithSpanNameFunc(testSpanNameFunc)),
