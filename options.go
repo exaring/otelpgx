@@ -128,6 +128,7 @@ func WithSpanNameFunc(fn SpanNameFunc) Option {
 // determines the value of the db.operation.name attribute.
 func WithSpanNameCtxFunc(fn SpanNameCtxFunc) Option {
 	return optionFunc(func(cfg *tracerConfig) {
+		cfg.trimQuerySpanName = true
 		cfg.spanNameCtxFunc = fn
 	})
 }
