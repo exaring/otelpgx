@@ -62,11 +62,11 @@ func WithMeterAttributes(attrs ...attribute.KeyValue) Option {
 	})
 }
 
+// WithTrimSQLInSpanName uses the configured span naming function instead of the
+// whole SQL statement. By default, this is [SQLOperationName].
+//
 // Deprecated: This is now the default behavior; use [WithFullSQLInSpanName] to
 // opt back into the previous behavior of using the whole SQL statement.
-//
-// WithTrimSQLInSpanName uses the SQL statement's first word (the operation
-// name, e.g. "SELECT") as the span name.
 func WithTrimSQLInSpanName() Option {
 	return optionFunc(func(cfg *tracerConfig) {
 		cfg.fullQuerySpanName = false

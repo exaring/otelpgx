@@ -565,6 +565,72 @@ func TestTracer_spanName(t *testing.T) {
 	}
 }
 
+func TestTracer_sqlOperationNameDoesNotCaptureLiterals(t *testing.T) {
+	ctx := context.Background()
+
+	recorder := tracetest.NewSpanRecorder()
+	tracerProvider := sdktrace.NewTracerProvider(
+		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+		sdktrace.WithSpanProcessor(recorder),
+	)
+	t.Cleanup(func() { require.NoError(t, tracerProvider.Shutdown(ctx)) })
+
+	reader := sdkmetric.NewManualReader()
+	meterProvider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	t.Cleanup(func() { require.NoError(t, meterProvider.Shutdown(ctx)) })
+
+	tracer := NewTracer(
+		WithTracerProvider(tracerProvider),
+		WithMeterProvider(meterProvider),
+		WithDisableSQLStatementInAttributes(),
+		WithMetricOperationName(SQLOperationName),
+	)
+	ctx, parent := tracerProvider.Tracer("caller").Start(ctx, "parent")
+	defer parent.End()
+
+	queries := []string{
+		"SELECT('sensitive-example')",
+		"SELECT(1)",
+		"SELECT/* comment */ 1",
+		"/* outer /* inner */ tail */ SELECT 1",
+		"-- comment\rSELECT 1",
+	}
+	for _, query := range queries {
+		queryCtx := tracer.TraceQueryStart(ctx, nil, pgx.TraceQueryStartData{SQL: query})
+		tracer.TraceQueryEnd(queryCtx, nil, pgx.TraceQueryEndData{})
+	}
+
+	spans := recorder.Ended()
+	require.Len(t, spans, len(queries))
+	for _, span := range spans {
+		assert.Equal(t, "SELECT", span.Name())
+		for _, attr := range span.Attributes() {
+			assert.NotEqual(t, attribute.Key("db.query.text"), attr.Key)
+			assert.NotContains(t, attr.Value.Emit(), "sensitive-example")
+		}
+	}
+
+	var rm metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(ctx, &rm))
+	for _, sm := range rm.ScopeMetrics {
+		for _, metric := range sm.Metrics {
+			if metric.Name != "db.client.operation.duration" {
+				continue
+			}
+			histogram, ok := metric.Data.(metricdata.Histogram[float64])
+			require.True(t, ok, "unexpected duration metric type %T", metric.Data)
+			require.Len(t, histogram.DataPoints, 1, "SQL variants expanded metric cardinality")
+			point := histogram.DataPoints[0]
+			assert.Equal(t, uint64(len(queries)), point.Count)
+			operation, ok := point.Attributes.Value(attribute.Key("db.operation.name"))
+			require.True(t, ok, "missing db.operation.name")
+			assert.Equal(t, "SELECT", operation.AsString())
+			return
+		}
+	}
+	t.Fatal("duration metric not found")
+}
+
 func TestTracer_metricOperationName(t *testing.T) {
 	conn := newMockConn(t, "fakehost", 5432, "fakeuser", "fakedb")
 	boom := errors.New("boom")
