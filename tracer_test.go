@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgproto3"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/attribute"
@@ -711,6 +713,187 @@ func TestTracer_metricOperationName(t *testing.T) {
 			}
 			require.Truef(t, gotOK, "missing db.operation.name on %s", tt.metric)
 			assert.Equal(t, tt.wantOperationName, gotOperationName)
+		})
+	}
+}
+
+func TestTracer_metricAttributeOwnership(t *testing.T) {
+	for _, count := range []int{0, 1, 2, 3, 7, 8, 15} {
+		for _, separate := range []bool{false, true} {
+			for _, named := range []bool{false, true} {
+				t.Run(fmt.Sprintf("attrs=%d/separate=%t/named=%t", count, separate, named), func(t *testing.T) {
+					ctx := context.Background()
+					reader := sdkmetric.NewManualReader()
+					provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+					t.Cleanup(func() { require.NoError(t, provider.Shutdown(ctx)) })
+
+					var attrs []attribute.KeyValue
+					for i := range count {
+						attrs = append(attrs, attribute.String(fmt.Sprintf("zz.%02d", count-i), fmt.Sprint(i)))
+					}
+					if count > 0 {
+						attrs = append(attrs, attribute.String("duplicate", "first"), attribute.String("duplicate", "last"))
+					}
+					before := slices.Clone(attrs)
+					wantAttrs := map[attribute.Key]attribute.Value{
+						"db.system.name": attribute.StringValue("postgresql"),
+					}
+					for _, attr := range before {
+						wantAttrs[attr.Key] = attr.Value
+					}
+
+					opts := []Option{WithMeterProvider(provider), WithTracerProvider(noop.NewTracerProvider())}
+					if separate {
+						for _, attr := range attrs {
+							opts = append(opts, WithMeterAttributes(attr))
+						}
+					} else {
+						opts = append(opts, WithMeterAttributes(attrs...))
+					}
+					if named {
+						opts = append(opts, WithMetricOperationName(SQLOperationName))
+					}
+					tracer := NewTracer(opts...)
+					assert.Equal(t, before, attrs, "constructor modified caller's attributes")
+
+					for _, err := range []error{nil, errors.New("operation failed")} {
+						tracer.TraceQueryEnd(tracer.TraceQueryStart(ctx, nil, pgx.TraceQueryStartData{SQL: "SELECT 1"}), nil, pgx.TraceQueryEndData{Err: err})
+						tracer.TracePrepareEnd(tracer.TracePrepareStart(ctx, nil, pgx.TracePrepareStartData{SQL: "SELECT 1"}), nil, pgx.TracePrepareEndData{Err: err})
+						tracer.TraceCopyFromEnd(tracer.TraceCopyFromStart(ctx, nil, pgx.TraceCopyFromStartData{}), nil, pgx.TraceCopyFromEndData{Err: err})
+						tracer.TraceBatchEnd(tracer.TraceBatchStart(ctx, nil, pgx.TraceBatchStartData{}), nil, pgx.TraceBatchEndData{Err: err})
+						tracer.TraceConnectEnd(tracer.TraceConnectStart(ctx, pgx.TraceConnectStartData{}), pgx.TraceConnectEndData{Err: err})
+						tracer.TraceAcquireEnd(tracer.TraceAcquireStart(ctx, nil, pgxpool.TraceAcquireStartData{}), nil, pgxpool.TraceAcquireEndData{Err: err})
+					}
+
+					var rm metricdata.ResourceMetrics
+					require.NoError(t, reader.Collect(ctx, &rm))
+					var seenMetrics []string
+					for _, sm := range rm.ScopeMetrics {
+						for _, m := range sm.Metrics {
+							switch m.Name {
+							case "db.client.operation.duration":
+								data, ok := m.Data.(metricdata.Histogram[float64])
+								require.True(t, ok, "duration must be a histogram")
+								for _, point := range data.DataPoints {
+									assert.Equal(t, uint64(2), point.Count)
+								}
+							case "db.client.operation.errors":
+								data, ok := m.Data.(metricdata.Sum[int64])
+								require.True(t, ok, "errors must be a counter")
+								for _, point := range data.DataPoints {
+									assert.Equal(t, int64(1), point.Value)
+								}
+							default:
+								continue
+							}
+							seenMetrics = append(seenMetrics, m.Name)
+							var seenOperations []string
+							for _, pointAttrs := range dataPointAttributes(m.Data) {
+								op, ok := pointAttrs.Value(PGXOperationTypeKey)
+								require.True(t, ok, "%s missing operation type", m.Name)
+								seenOperations = append(seenOperations, op.AsString())
+								for key, want := range wantAttrs {
+									got, ok := pointAttrs.Value(key)
+									assert.True(t, ok, "%s/%s missing %s", m.Name, op.AsString(), key)
+									assert.Equal(t, want, got, "%s/%s attribute %s", m.Name, op.AsString(), key)
+								}
+								name, hasName := pointAttrs.Value("db.operation.name")
+								wantName := named && (op.AsString() == "query" || op.AsString() == "prepare")
+								assert.Equal(t, wantName, hasName, "%s/%s operation name", m.Name, op.AsString())
+								wantLen := len(wantAttrs) + 1
+								if wantName {
+									assert.Equal(t, attribute.StringValue("SELECT"), name)
+									wantLen++
+								}
+								assert.Equal(t, wantLen, pointAttrs.Len())
+							}
+							assert.ElementsMatch(t, []string{"query", "prepare", "copy", "batch", "connect", "acquire"}, seenOperations, m.Name)
+						}
+					}
+					assert.ElementsMatch(t, []string{"db.client.operation.duration", "db.client.operation.errors"}, seenMetrics)
+					assert.Equal(t, before, attrs, "recording modified caller's attributes")
+				})
+			}
+		}
+	}
+}
+
+func TestTracer_metricAttributePrecedence(t *testing.T) {
+	tests := []struct {
+		name          string
+		operationName OperationNameFunc
+		wantQueryName string
+	}{
+		{name: "disabled", wantQueryName: "configured-last"},
+		{
+			name:          "non-empty name",
+			operationName: func(context.Context, string) string { return "SELECT" },
+			wantQueryName: "SELECT",
+		},
+		{
+			name:          "empty name",
+			operationName: func(context.Context, string) string { return "" },
+			wantQueryName: "configured-last",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			reader := sdkmetric.NewManualReader()
+			provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+			t.Cleanup(func() { require.NoError(t, provider.Shutdown(ctx)) })
+			opts := []Option{
+				WithMeterProvider(provider),
+				WithTracerProvider(noop.NewTracerProvider()),
+				WithMeterAttributes(
+					PGXOperationTypeKey.String("configured-first"),
+					attribute.String("db.operation.name", "configured-first"),
+					attribute.String("db.system.name", "configured-first"),
+				),
+				WithMeterAttributes(
+					PGXOperationTypeKey.String("configured-last"),
+					attribute.String("db.operation.name", "configured-last"),
+					attribute.String("db.system.name", "configured-last"),
+				),
+			}
+			if tt.operationName != nil {
+				opts = append(opts, WithMetricOperationName(tt.operationName))
+			}
+			tracer := NewTracer(opts...)
+			boom := errors.New("operation failed")
+			tracer.TraceQueryEnd(tracer.TraceQueryStart(ctx, nil, pgx.TraceQueryStartData{SQL: "SELECT 1"}), nil, pgx.TraceQueryEndData{Err: boom})
+			tracer.TraceConnectEnd(tracer.TraceConnectStart(ctx, pgx.TraceConnectStartData{}), pgx.TraceConnectEndData{Err: boom})
+
+			var rm metricdata.ResourceMetrics
+			require.NoError(t, reader.Collect(ctx, &rm))
+			var seenMetrics []string
+			for _, sm := range rm.ScopeMetrics {
+				for _, m := range sm.Metrics {
+					if m.Name != "db.client.operation.duration" && m.Name != "db.client.operation.errors" {
+						continue
+					}
+					seenMetrics = append(seenMetrics, m.Name)
+					var seenOperations []string
+					for _, attrs := range dataPointAttributes(m.Data) {
+						op, ok := attrs.Value(PGXOperationTypeKey)
+						require.True(t, ok)
+						seenOperations = append(seenOperations, op.AsString())
+						wantName := "configured-last"
+						if op.AsString() == "query" {
+							wantName = tt.wantQueryName
+						}
+						name, ok := attrs.Value("db.operation.name")
+						assert.True(t, ok)
+						assert.Equal(t, attribute.StringValue(wantName), name, "%s/%s operation name", m.Name, op.AsString())
+						system, ok := attrs.Value("db.system.name")
+						assert.True(t, ok)
+						assert.Equal(t, attribute.StringValue("configured-last"), system, "%s/%s database system", m.Name, op.AsString())
+						assert.Equal(t, 3, attrs.Len())
+					}
+					assert.ElementsMatch(t, []string{"query", "connect"}, seenOperations, m.Name)
+				}
+			}
+			assert.ElementsMatch(t, []string{"db.client.operation.duration", "db.client.operation.errors"}, seenMetrics)
 		})
 	}
 }

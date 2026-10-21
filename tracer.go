@@ -201,7 +201,11 @@ func (t *Tracer) createAttributeSets() {
 		pgxOperationAcquire,
 	}
 	for _, op := range operations {
-		attrs := append(t.meterAttrs, PGXOperationTypeKey.String(op))
+		// NewSet sorts and deduplicates its input in place. Copy the configured
+		// attributes so building one operation's set cannot affect the others.
+		attrs := make([]attribute.KeyValue, len(t.meterAttrs), len(t.meterAttrs)+1)
+		copy(attrs, t.meterAttrs)
+		attrs = append(attrs, PGXOperationTypeKey.String(op))
 		t.metricAttrs[op] = attribute.NewSet(attrs...)
 	}
 }

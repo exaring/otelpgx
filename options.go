@@ -56,6 +56,9 @@ func WithTracerAttributes(attrs ...attribute.KeyValue) Option {
 }
 
 // WithMeterAttributes specifies additional attributes to be added to metrics.
+// Later values override earlier values with the same key.
+// [PGXOperationTypeKey] is always set by the instrumentation. A non-empty name
+// produced by [WithMetricOperationName] overrides a supplied db.operation.name.
 func WithMeterAttributes(attrs ...attribute.KeyValue) Option {
 	return optionFunc(func(cfg *tracerConfig) {
 		cfg.meterAttrs = append(cfg.meterAttrs, attrs...)
@@ -188,7 +191,8 @@ func WithIncludeQueryParameters(filter ...QueryParametersFilterFunc) Option {
 // OperationNameFunc returns the value for the db.operation.name attribute on
 // the db.client.operation.duration and db.client.operation.errors metrics,
 // given the SQL statement for a query, prepare, or batch-query call. Return
-// "" to omit the attribute for a particular call.
+// "" to omit the computed name; a name explicitly set with [WithMeterAttributes]
+// is retained.
 type OperationNameFunc func(ctx context.Context, sql string) string
 
 // WithMetricOperationName enables the db.operation.name attribute on the
