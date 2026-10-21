@@ -2,6 +2,7 @@ package otelpgx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -41,6 +42,17 @@ const (
 // (db.system.name, db.client.connection.pool.name) on key collision, since
 // attribute.NewSet applies last-value-wins semantics over the resulting slice.
 func RecordStats(db PoolStats, opts ...StatsOption) error {
+	_, err := RegisterStats(db, opts...)
+	return err
+}
+
+// RegisterStats records pool statistics until the returned cleanup function is
+// called. Cleanup is idempotent and safe alongside collection. A collection
+// already in progress may finish before cleanup returns. Close the registration
+// before closing the pool; pool.Close does not automatically unregister it.
+// A failed cleanup can be retried. Unlike [RecordStats], this API lets callers
+// release the callback's pool reference.
+func RegisterStats(db PoolStats, opts ...StatsOption) (func() error, error) {
 	connCfg := db.Config().ConnConfig
 	poolName := fmt.Sprintf("%s:%d/%s", connCfg.Host, connCfg.Port, connCfg.Database)
 
@@ -73,7 +85,7 @@ func recordStats(
 	db PoolStats,
 	minimumReadDBStatsInterval time.Duration,
 	attrs ...attribute.KeyValue,
-) error {
+) (func() error, error) {
 	var (
 		err error
 
@@ -97,18 +109,15 @@ func recordStats(
 		dbStats     *pgxpool.Stat
 		lastDBStats time.Time
 
-		// lock prevents a race between batch observer and instrument registration.
+		// lock serializes statistics collection and cleanup.
 		lock sync.Mutex
 	)
-
-	lock.Lock()
-	defer lock.Unlock()
 
 	if acquireCount, err = meter.Int64ObservableCounter(
 		pgxPoolAcquireCount,
 		metric.WithDescription("Cumulative count of successful acquires from the pool."),
 	); err != nil {
-		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolAcquireCount, err)
+		return nil, fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolAcquireCount, err)
 	}
 
 	if acquireDuration, err = meter.Int64ObservableCounter(
@@ -116,77 +125,77 @@ func recordStats(
 		metric.WithDescription("Total duration of all successful acquires from the pool in nanoseconds."),
 		metric.WithUnit("ns"),
 	); err != nil {
-		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolAcquireDuration, err)
+		return nil, fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolAcquireDuration, err)
 	}
 
 	if acquiredConns, err = meter.Int64ObservableUpDownCounter(
 		pgxPoolAcquiredConnections,
 		metric.WithDescription("Number of currently acquired connections in the pool."),
 	); err != nil {
-		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolAcquiredConnections, err)
+		return nil, fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolAcquiredConnections, err)
 	}
 
 	if cancelledAcquires, err = meter.Int64ObservableCounter(
 		pgxPoolCancelledAcquires,
 		metric.WithDescription("Cumulative count of acquires from the pool that were canceled by a context."),
 	); err != nil {
-		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolCancelledAcquires, err)
+		return nil, fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolCancelledAcquires, err)
 	}
 
 	if constructingConns, err = meter.Int64ObservableUpDownCounter(
 		pgxPoolConstructingConnections,
 		metric.WithDescription("Number of connections with construction in progress in the pool."),
 	); err != nil {
-		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolConstructingConnections, err)
+		return nil, fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolConstructingConnections, err)
 	}
 
 	if emptyAcquires, err = meter.Int64ObservableCounter(
 		pgxPoolEmptyAcquire,
 		metric.WithDescription("Cumulative count of successful acquires from the pool that waited for a resource to be released or constructed because the pool was empty."),
 	); err != nil {
-		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolEmptyAcquire, err)
+		return nil, fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolEmptyAcquire, err)
 	}
 
 	if idleConns, err = meter.Int64ObservableUpDownCounter(
 		pgxPoolIdleConnections,
 		metric.WithDescription("Number of currently idle connections in the pool."),
 	); err != nil {
-		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolIdleConnections, err)
+		return nil, fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolIdleConnections, err)
 	}
 
 	if maxConns, err = meter.Int64ObservableGauge(
 		pgxPoolMaxConnections,
 		metric.WithDescription("Maximum size of the pool."),
 	); err != nil {
-		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolMaxConnections, err)
+		return nil, fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolMaxConnections, err)
 	}
 
 	if maxIdleDestroyCount, err = meter.Int64ObservableCounter(
 		pgxPoolMaxIdleDestroyCount,
 		metric.WithDescription("Cumulative count of connections destroyed because they exceeded MaxConnectionsIdleTime."),
 	); err != nil {
-		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolMaxIdleDestroyCount, err)
+		return nil, fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolMaxIdleDestroyCount, err)
 	}
 
 	if maxLifetimeDestroyCount, err = meter.Int64ObservableCounter(
 		pgxPoolMaxLifetimeDestroyCount,
 		metric.WithDescription("Cumulative count of connections destroyed because they exceeded MaxConnectionsLifetime."),
 	); err != nil {
-		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolMaxLifetimeDestroyCount, err)
+		return nil, fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolMaxLifetimeDestroyCount, err)
 	}
 
 	if newConnsCount, err = meter.Int64ObservableCounter(
 		pgxPoolNewConnectionsCount,
 		metric.WithDescription("Cumulative count of new connections opened."),
 	); err != nil {
-		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolNewConnectionsCount, err)
+		return nil, fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolNewConnectionsCount, err)
 	}
 
 	if totalConns, err = meter.Int64ObservableUpDownCounter(
 		pgxPoolTotalConnections,
 		metric.WithDescription("Total number of resources currently in the pool. The value is the sum of ConstructingConnections, AcquiredConnections, and IdleConnections."),
 	); err != nil {
-		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolTotalConnections, err)
+		return nil, fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolTotalConnections, err)
 	}
 
 	if emptyAcquireWaitTime, err = meter.Int64ObservableCounter(
@@ -194,17 +203,21 @@ func recordStats(
 		metric.WithDescription("Total time waited for successful acquires from the pool for a resource to be released or constructed because the pool was empty."),
 		metric.WithUnit("ns"),
 	); err != nil {
-		return fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolEmptyAcquireWaitTime, err)
+		return nil, fmt.Errorf("failed to create asynchronous metric: %s with error: %w", pgxPoolEmptyAcquireWaitTime, err)
 	}
 
 	observeOptions = []metric.ObserveOption{
 		metric.WithAttributeSet(attribute.NewSet(attrs...)),
 	}
 
-	_, err = meter.RegisterCallback(
+	registration, err := meter.RegisterCallback(
 		func(ctx context.Context, o metric.Observer) error {
 			lock.Lock()
 			defer lock.Unlock()
+
+			if db == nil {
+				return nil
+			}
 
 			now := time.Now()
 			if now.Sub(lastDBStats) >= minimumReadDBStatsInterval {
@@ -243,5 +256,34 @@ func recordStats(
 		emptyAcquireWaitTime,
 	)
 
-	return err
+	if err != nil {
+		// No cleanup handle is returned on failure. Release the pool even if
+		// unregistering the partial registration also fails.
+		lock.Lock()
+		db = nil
+		dbStats = nil
+		lock.Unlock()
+		if registration != nil {
+			err = errors.Join(err, registration.Unregister())
+		}
+		return nil, err
+	}
+	var cleanupLock sync.Mutex
+	stopped := false
+	return func() error {
+		cleanupLock.Lock()
+		defer cleanupLock.Unlock()
+		if stopped {
+			return nil
+		}
+		if err := registration.Unregister(); err != nil {
+			return err
+		}
+		lock.Lock()
+		db = nil
+		dbStats = nil
+		lock.Unlock()
+		stopped = true
+		return nil
+	}, nil
 }

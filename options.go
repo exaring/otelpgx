@@ -213,7 +213,7 @@ func WithMetricOperationName(fn OperationNameFunc) Option {
 	})
 }
 
-// StatsOption allows for managing RecordStats configuration using functional options.
+// StatsOption configures [RecordStats] and [RegisterStats].
 type StatsOption interface {
 	applyStatsOptions(o *statsOptions)
 }

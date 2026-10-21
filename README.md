@@ -27,21 +27,34 @@ go get github.com/exaring/otelpgx
 Create the tracer as part of your connection:
 
 ```go
-cfg, err := pgxpool.ParseConfig(connString)
-if err != nil {
-    return nil, fmt.Errorf("create connection pool: %w", err)
-}
+func run(ctx context.Context, connString string) (err error) {
+    cfg, err := pgxpool.ParseConfig(connString)
+    if err != nil {
+        return fmt.Errorf("create connection pool: %w", err)
+    }
+    cfg.ConnConfig.Tracer = otelpgx.NewTracer()
 
-cfg.ConnConfig.Tracer = otelpgx.NewTracer()
+    pool, err := pgxpool.NewWithConfig(ctx, cfg)
+    if err != nil {
+        return fmt.Errorf("connect to database: %w", err)
+    }
+    defer pool.Close()
 
-conn, err := pgxpool.NewWithConfig(ctx, cfg)
-if err != nil {
-    return nil, fmt.Errorf("connect to database: %w", err)
-}
+    stopStats, err := otelpgx.RegisterStats(pool)
+    if err != nil {
+        return fmt.Errorf("unable to record database stats: %w", err)
+    }
+    // Deferred calls run in reverse order: unregister before closing the pool.
+    defer func() { err = errors.Join(err, stopStats()) }()
 
-if err := otelpgx.RecordStats(conn); err != nil {
-    return nil, fmt.Errorf("unable to record database stats: %w", err)
+    // Run application work using pool in this scope.
+    return nil
 }
 ```
+
+`RegisterStats` returns an idempotent cleanup function. A collection already in
+progress may finish before cleanup returns. `pool.Close()` does not unregister
+statistics automatically. The source-compatible `RecordStats` API keeps its
+registration for the lifetime of the meter provider.
 
 See [options.go](options.go) for the full list of options.
